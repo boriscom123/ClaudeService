@@ -1,0 +1,12 @@
+# Вставьте этот сервис в services: вашего docker-compose.yml.
+# Требует сервисы postgres и redis в том же compose.
+  devbot:
+    build: ./services/devbot
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /tmp/devbot-attachments:/attachments
