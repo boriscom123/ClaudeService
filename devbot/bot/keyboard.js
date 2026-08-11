@@ -36,7 +36,7 @@ async function projectMenuInline(redis, current) {
 // ReplyKeyboard, не лечится; для «без reply» нужен inline.
 const WELCOME_KEYBOARD = {
   keyboard: [
-    ['💻 Информация о VPS', '🗑️ Очистить чат'],
+    ['💻 Информация о VPS', '🔄 Перезагрузить VPS'],
     ['📁 Проект', '❓ Справка'],
   ],
   resize_keyboard: true,

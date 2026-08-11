@@ -3,27 +3,39 @@ const { getVpsStatus } = require('./vps');
 const { enqueue, redis } = require('../../claude/queue');
 const { MAIN_MENU_INLINE, projectMenuInline } = require('../keyboard');
 
-const HELP_TEXT =
-  `<b>🤖 DevBot — сервисный бот для Claude</b>\n` +
-  `Персональный мост к Claude CLI на сервере.\n\n` +
-  `<b>💬 Общение с Claude</b>\n` +
-  `Просто напиши любой текст — он уйдёт напрямую в Claude, а ответ придёт сюда. ` +
-  `Можно прислать и фото/скриншот.\n\n` +
-  `<b>➕ Очередь</b>\n` +
-  `<code>!текст</code> — в очередь текущего проекта (выполнится по простою).\n` +
-  `<code>!!!текст</code> — в приоритет очереди.\n` +
-  `<code>!&lt;код&gt; текст</code> — в очередь другого проекта (коды: game, cm, uq).\n\n` +
-  `<b>🔘 Кнопки меню</b>\n` +
-  `💻 Информация о VPS — CPU/RAM/диск/контейнеры\n` +
-  `🔀 Фиксация на git — commit + push\n` +
-  `📁 Проект — переключить Claude между проектами VPS\n` +
-  `📸 Снапшот — снимок документации проекта на VPS + Google Drive\n` +
-  `🔄 Перезагрузить VPS — снимок + перезагрузка сервера (Claude вернётся сам)\n` +
-  `🗑️ Очистить чат — удалить сообщения бота\n` +
-  `❓ Справка — это сообщение\n\n` +
-  `<b>Команды</b>\n` +
-  `/start — приветствие и клавиатура\n` +
-  `/help — эта справка`;
+// Справка формируется ДИНАМИЧЕСКИ: список кодов проектов берём из того же
+// Redis-хэша cs:projects, что и меню «Проект». Так справка не разъезжается
+// при добавлении/удалении проекта (единый источник правды — scripts/projects.sh).
+async function buildHelpText() {
+  const map = await redis.hGetAll('cs:projects').catch(() => ({}));
+  const ids = Object.keys(map || {}).sort();
+  const codesLine = ids.length
+    ? ids.map(id => `<code>${id}</code> — ${map[id]}`).join(', ')
+    : 'см. меню 📁 Проект';
+  return (
+    `<b>🤖 DevBot — сервисный бот для Claude</b>\n` +
+    `Персональный мост к Claude CLI на сервере.\n\n` +
+    `<b>💬 Общение с Claude</b>\n` +
+    `Просто напиши любой текст — он уйдёт напрямую в Claude, а ответ придёт сюда. ` +
+    `Можно прислать и фото/скриншот.\n\n` +
+    `<b>➕ Очередь</b>\n` +
+    `<code>!текст</code> — в очередь текущего проекта (выполнится по простою).\n` +
+    `<code>!!!текст</code> — в приоритет очереди.\n` +
+    `<code>!&lt;код&gt; текст</code> — в очередь другого проекта.\n` +
+    `Коды проектов: ${codesLine}.\n\n` +
+    `<b>🔘 Кнопки меню</b>\n` +
+    `💻 Информация о VPS — CPU/RAM/диск/контейнеры\n` +
+    `🔀 Фиксация на git — commit + push\n` +
+    `📁 Проект — переключить Claude между проектами VPS\n` +
+    `📸 Снапшот — снимок документации проекта на VPS + Google Drive\n` +
+    `🔄 Перезагрузить VPS — снимок + перезагрузка сервера (Claude вернётся сам)\n` +
+    `🗑️ Очистить чат — удалить сообщения бота\n` +
+    `❓ Справка — это сообщение\n\n` +
+    `<b>Команды</b>\n` +
+    `/start — приветствие и клавиатура\n` +
+    `/help — эта справка`
+  );
+}
 
 // Показать главное меню (inline). Опционально гасим нижнюю ReplyKeyboard,
 // если она ещё висит в кеше клиента.
@@ -88,9 +100,9 @@ async function runMenuAction(chatId, action) {
         ]] } });
       break;
     case 'help':
-      await send(chatId, HELP_TEXT);
+      await send(chatId, await buildHelpText());
       break;
   }
 }
 
-module.exports = { runMenuAction, showMenu, HELP_TEXT };
+module.exports = { runMenuAction, showMenu, buildHelpText };
