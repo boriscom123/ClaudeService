@@ -12,10 +12,16 @@ PROJECT_DIR="$(project_dir "$PROJECT_ID")"
 SESSION="${CLAUDE_SESSION:-claude}"
 TMUX_SOCKET="/tmp/tmux-1000/default"
 TMUX_CMD="tmux -S $TMUX_SOCKET"
-BOT_TOKEN="8916100099:AAHivhMP_6nUHKE-KLA6JVUn4V825F-ixV8"
-CHAT_ID="941953678"
+
+# Токен/chat_id — только из .env рядом со скриптами (в .gitignore, не в репозитории).
+# Не хардкодим секреты в коде. Читаем ровно нужные ключи, не сорся весь .env.
+ENV_FILE="${CS_ENV_FILE:-$SCRIPT_DIR/../.env}"
+get_env() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"'\r'; }
+BOT_TOKEN="$(get_env DEVBOT_TOKEN)"
+CHAT_ID="$(get_env TELEGRAM_ADMIN_CHAT_ID)"
 
 tg_notify() {
+  [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ] || return 0
   curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
     -H "Content-Type: application/json" \
     -d "$(jq -n --arg chat_id "$CHAT_ID" --arg text "$1" \

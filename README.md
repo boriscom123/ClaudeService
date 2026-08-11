@@ -88,6 +88,13 @@ sudo bash scripts/install-systemd.sh
 # запусти tmux-сессию 'claude' с Claude CLI на хосте (её слушает мост)
 ```
 
+Или одной командой: `bash install.sh` (Linux/VPS).
+
+**Windows (Docker Desktop):** контейнерную часть (redis + devbot) поднимает
+`powershell -ExecutionPolicy Bypass -File .\install.ps1`. Host-оркестрация
+(systemd-мост, tmux-сессия `claude`, автостарт, симлинки) — только Linux/VPS;
+на Windows её нет, разворачивай эту часть на самом сервере.
+
 Проверка: `docker compose logs devbot --tail=5` и `systemctl is-active tg-bridge`.
 
 ## Подключение проекта
