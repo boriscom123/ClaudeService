@@ -1,5 +1,8 @@
 const config = require('../config');
-const pool = require('../db/pool');
+const { redis } = require('../claude/queue');
+
+const MSGIDS_KEY = chatId => `cs:msgids:${chatId}`;
+const MSGIDS_LIMIT = 500;
 
 async function apiCall(method, body) {
   const r = await fetch(`https://api.telegram.org/bot${config.token}/${method}`, {
@@ -21,10 +24,9 @@ async function send(chatId, text, extra = {}) {
   });
   if (data.ok) {
     const msgId = data.result.message_id;
-    pool.query(
-      'INSERT INTO telegram_bot_messages (chat_id, message_id) VALUES ($1, $2)',
-      [chatId, msgId]
-    ).catch(() => {});
+    redis.rPush(MSGIDS_KEY(chatId), String(msgId))
+      .then(() => redis.lTrim(MSGIDS_KEY(chatId), -MSGIDS_LIMIT, -1))
+      .catch(() => {});
     return msgId;
   }
   return null;
@@ -59,25 +61,19 @@ async function answerCallback(id, text) {
 
 async function clearMessages(chatId) {
   const chatInfo = await apiCall('getChat', { chat_id: chatId });
-  // message_id из pg (BIGINT) приходит строкой, из Telegram — числом → сравниваем строками.
   const pinnedId = chatInfo.ok && chatInfo.result.pinned_message
     ? String(chatInfo.result.pinned_message.message_id) : null;
-  const { rows } = await pool.query(
-    'SELECT message_id FROM telegram_bot_messages WHERE chat_id=$1 ORDER BY message_id ASC',
-    [chatId]
-  );
+  // id сообщений бота трекаются в Redis-списке (замена telegram_bot_messages).
+  const ids = await redis.lRange(MSGIDS_KEY(chatId), 0, -1).catch(() => []);
   let deleted = 0;
-  for (const row of rows) {
-    if (pinnedId && String(row.message_id) === pinnedId) continue; // закреплённое не трогаем
-    const r = await apiCall('deleteMessage', { chat_id: chatId, message_id: row.message_id });
+  for (const id of ids) {
+    if (pinnedId && String(id) === pinnedId) continue; // закреплённое не трогаем
+    const r = await apiCall('deleteMessage', { chat_id: chatId, message_id: Number(id) });
     if (r.ok) deleted++;
   }
-  // Таблицу чистим, но запись о закреплённом сообщении сохраняем.
-  if (pinnedId) {
-    await pool.query('DELETE FROM telegram_bot_messages WHERE chat_id=$1 AND message_id <> $2', [chatId, pinnedId]);
-  } else {
-    await pool.query('DELETE FROM telegram_bot_messages WHERE chat_id=$1', [chatId]);
-  }
+  // Список чистим; запись о закреплённом сообщении сохраняем.
+  await redis.del(MSGIDS_KEY(chatId)).catch(() => {});
+  if (pinnedId) await redis.rPush(MSGIDS_KEY(chatId), pinnedId).catch(() => {});
   return deleted;
 }
 

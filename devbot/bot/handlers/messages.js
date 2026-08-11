@@ -1,6 +1,4 @@
-const pool = require('../../db/pool');
 const { send, apiCall } = require('../sender');
-const { createTask } = require('./tasks');
 const { enqueue, redis } = require('../../claude/queue');
 const { downloadPhoto } = require('../downloader');
 const { runMenuAction } = require('./actions');
@@ -15,12 +13,33 @@ function mediaType(message) {
 
 // Лейблы кнопок нижней клавиатуры → пункт меню (+ алиасы старых лейблов из кеша).
 const MENU_LABELS = {
-  '📋 Задачи': 'tasks', '📋 Список задач': 'tasks',
   '💻 Информация о VPS': 'vps', '💻 Статус VPS': 'vps',
   '🔀 Фиксация на git': 'git', '🔀 Фиксировать git': 'git',
   '🗑️ Очистить чат': 'clear',
+  '📸 Снапшот': 'snapshot',
+  '🔄 Перезагрузить VPS': 'reboot',
+  '📁 Проект': 'project',
   '❓ Справка': 'help', '❓ Помощь': 'help',
 };
+
+// Известные коды проектов — из cs:projects (пишет мост из scripts/projects.sh).
+async function knownProjects() {
+  return (await redis.hGetAll('cs:projects').catch(() => ({}))) || {};
+}
+
+// Разбор ведущих '!' → tier + очистка текста + опц. код проекта.
+//   '!!!' (3+) → prio, '!'/'!!' → hold, иначе → now.
+//   Первый токен после '!' считается кодом проекта, только если он ∈ projects.
+function classify(text, projects) {
+  const m = text.match(/^(!+)\s*/);
+  if (!m) return { tier: 'now', text, target: null };
+  const tier = m[1].length >= 3 ? 'prio' : 'hold';
+  let rest = text.slice(m[0].length);
+  let target = null;
+  const tok = rest.match(/^(\S+)\s+/);
+  if (tok && projects[tok[1]]) { target = tok[1]; rest = rest.slice(tok[0].length); }
+  return { tier, text: rest.trim(), target };
+}
 
 async function handleMessage(message) {
   const chatId = message.chat.id;
@@ -36,46 +55,25 @@ async function handleMessage(message) {
     } else {
       const mPath = hasPhoto ? await downloadPhoto(message) : null;
       await redis.del(`tg:askown:${chatId}`);
-      await enqueue(chatId, message.message_id, `[Свой вариант] ${text}`, mPath, mediaType(message));
+      await enqueue(chatId, message.message_id, `[Свой вариант] ${text}`,
+        { attachmentPath: mPath, attachmentType: mediaType(message) });
       await send(chatId, '✍️ Принял твой вариант — передал Claude.');
       return;
     }
   }
 
-  // Режим фидбека по возвращённой задаче (после «🔄 Вернуть»):
-  // следующее сообщение = описание «что не так» (+ опц. фото/видео).
-  const fbTag = await redis.get(`tg:feedback:${chatId}`);
-  if (fbTag) {
-    // Команда или кнопка меню → отменяем режим фидбека, обрабатываем как обычно
-    if (text.startsWith('/') || MENU_LABELS[text]) {
-      await redis.del(`tg:feedback:${chatId}`);
-    } else {
-      const mPath = hasPhoto ? await downloadPhoto(message) : null;
-      const mType = mediaType(message);
-      await pool.query(
-        `INSERT INTO dev_feedback (task_tag, feedback, from_chat_id) VALUES ($1, $2, $3)`,
-        [fbTag, text || '(вложение)', chatId]);
-      await pool.query(`UPDATE dev_tasks SET status='in_progress', updated_at=NOW() WHERE tag=$1`, [fbTag]);
-      await redis.del(`tg:feedback:${chatId}`);
-      const fb = `Задача #${fbTag} возвращена на доработку. Что не так: ${text || '(см. вложение)'}`;
-      await enqueue(chatId, message.message_id, fb, mPath, mType);
-      await send(chatId, `🔄 Принял фидбек по <code>#${fbTag}</code> — передал Claude в работу.`);
-      return;
-    }
-  }
-
-  // ! в начале → создать задачу
+  // Префикс ! / !!! → очередь / приоритет (+ опц. код проекта для кросс-проекта)
   if (text.startsWith('!')) {
-    const photoPath = hasPhoto ? await downloadPhoto(message) : null;
-    const desc = text.slice(1).trim();
-    const fullDesc = photoPath
-      ? (desc ? `${desc} [+ скриншот]` : '[скриншот]')
-      : desc;
-    if (!fullDesc) {
-      await send(chatId, '❌ Напиши описание после !');
-      return;
-    }
-    await createTask(chatId, fullDesc, message.message_id, photoPath);
+    const projects = await knownProjects();
+    const { tier, text: body, target } = classify(text, projects);
+    const mPath = hasPhoto ? await downloadPhoto(message) : null;
+    const finalText = body || (mPath ? '[вложение]' : '');
+    if (!finalText) { await send(chatId, '❌ Напиши текст после <code>!</code>'); return; }
+    await enqueue(chatId, message.message_id, finalText, {
+      tier, targetProject: target, attachmentPath: mPath, attachmentType: mediaType(message),
+    });
+    const name = target ? ` проекта <b>${projects[target]}</b>` : '';
+    await send(chatId, tier === 'prio' ? `⏫ В приоритет${name}.` : `➕ В очередь${name}.`);
     return;
   }
 
@@ -94,22 +92,13 @@ async function handleMessage(message) {
   }
   if (text === '/help') { await runMenuAction(chatId, 'help'); return; }
 
-  // Легаси: «📌 Создать задачу» из старой клавиатуры
-  if (text === '📌 Создать задачу') {
-    await send(chatId, 'Чтобы создать задачу, начни сообщение с <code>!</code>\n\nПример: <code>!Исправить баг с картой</code>');
-    return;
-  }
-
   // Нажатия кнопок нижней клавиатуры
   if (MENU_LABELS[text]) { await runMenuAction(chatId, MENU_LABELS[text]); return; }
 
-  // /задача [описание] — legacy
-  const taskMatch = text.match(/^\/(?:задача|task)\s+(.+)/si);
-  if (taskMatch) { await createTask(chatId, taskMatch[1].trim()); return; }
-
-  // Всё остальное → Claude
+  // Всё остальное → Claude немедленно (инжект в активную сессию)
   const mPath = hasPhoto ? await downloadPhoto(message) : null;
-  await enqueue(chatId, message.message_id, text, mPath, mPath ? mediaType(message) : null);
+  await enqueue(chatId, message.message_id, text,
+    { attachmentPath: mPath, attachmentType: mPath ? mediaType(message) : null });
 }
 
 module.exports = { handleMessage };

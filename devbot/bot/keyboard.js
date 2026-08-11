@@ -4,33 +4,43 @@
 // выглядело «отвеченным». Inline-кнопки шлют callback и reply не создают.
 const MAIN_MENU_INLINE = {
   inline_keyboard: [
-    [{ text: '📋 Задачи', callback_data: 'm:tasks' }, { text: '🧪 На тестировании', callback_data: 'm:testing' }],
     [{ text: '💻 Статус VPS', callback_data: 'm:vps' }, { text: '🔀 Фиксировать git', callback_data: 'm:git' }],
-    [{ text: '🗑️ Очистить чат', callback_data: 'm:clear' }, { text: '❓ Помощь', callback_data: 'm:help' }],
+    [{ text: '📸 Снапшот', callback_data: 'm:snapshot' }, { text: '🗑️ Очистить чат', callback_data: 'm:clear' }],
+    [{ text: '📁 Проект', callback_data: 'm:project' }, { text: '🔄 Перезагрузить VPS', callback_data: 'm:reboot' }],
+    [{ text: '❓ Помощь', callback_data: 'm:help' }],
   ],
 };
 
-// Нижняя ReplyKeyboard приветствия. Пока одна кнопка — ❓ Помощь.
+// Иконки проектов по id (дефолт — 📁). Имена берём из cs:projects.
+const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫' };
+
+// Меню выбора проекта строится ДИНАМИЧЕСКИ из Redis-хэша cs:projects (id→имя),
+// который пишет мост из scripts/projects.sh. Добавление проекта не требует
+// пересборки devbot. Возвращает null, если реестр пуст (мост не запущен).
+async function projectMenuInline(redis) {
+  const map = await redis.hGetAll('cs:projects').catch(() => ({}));
+  const ids = Object.keys(map || {}).sort();
+  if (ids.length === 0) return null;
+  return {
+    inline_keyboard: ids.map(id => [{
+      text: `${PROJECT_ICONS[id] || '📁'} ${map[id]}`,
+      callback_data: `proj:${id}`,
+    }]),
+  };
+}
+
+// Нижняя ReplyKeyboard приветствия.
 // Отправляется ОДИН раз с приветствием (send() её не переотправляет),
 // поэтому нажатие помечается reply на приветствие — известное поведение
 // ReplyKeyboard, не лечится; для «без reply» нужен inline.
 const WELCOME_KEYBOARD = {
   keyboard: [
-    ['📋 Задачи', '💻 Информация о VPS'],
-    ['🔀 Фиксация на git', '🗑️ Очистить чат'],
-    ['❓ Справка'],
+    ['💻 Информация о VPS', '🔀 Фиксация на git'],
+    ['📸 Снапшот', '🗑️ Очистить чат'],
+    ['📁 Проект', '❓ Справка'],
   ],
   resize_keyboard: true,
   is_persistent: true,
 };
 
-function taskInlineKeyboard(tag) {
-  return {
-    inline_keyboard: [[
-      { text: '✅ Закрыть', callback_data: `ok:${tag}` },
-      { text: '🔄 Вернуть', callback_data: `reject:${tag}` },
-    ]],
-  };
-}
-
-module.exports = { MAIN_MENU_INLINE, WELCOME_KEYBOARD, taskInlineKeyboard };
+module.exports = { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline };

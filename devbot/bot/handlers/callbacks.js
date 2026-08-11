@@ -1,4 +1,3 @@
-const pool = require('../../db/pool');
 const { send, answerCallback, apiCall } = require('../sender');
 const { enqueue, redis } = require('../../claude/queue');
 const { runMenuAction } = require('./actions');
@@ -36,39 +35,31 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
-  if (action === 'ok') {
-    await pool.query(`UPDATE dev_tasks SET status='done', updated_at=NOW() WHERE tag=$1`, [tag]);
-    await pool.query(
-      `INSERT INTO dev_feedback (task_tag, feedback, from_chat_id) VALUES ($1, $2, $3)`,
-      [tag, 'Принято', chatId]
-    );
-    await answerCallback(callbackQuery.id, '✅ Задача закрыта');
-    await apiCall('deleteMessage', { chat_id: chatId, message_id: msgId });
-    await send(chatId, `✅ Задача <code>#${tag}</code> закрыта. Вливаю ветку в dev…`);
-    // Ветка задачи вливается в dev и пушится Claude'ом (git — на хосте в его сессии).
-    await enqueue(chatId, null, `[Закрыть задачу] #${tag}: влей ветку task/${tag} в dev, запушь dev, удали ветку задачи.`);
+  // proj:<id> — переключение проекта. Строку забирает МОСТ (watch-triggers.sh),
+  // а не Claude: switch-project.sh убивает сессию, в которой запущен.
+  if (action === 'proj') {
+    await answerCallback(callbackQuery.id, '🔄 Переключаю…');
+    await apiCall('editMessageReplyMarkup', {
+      chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] },
+    });
+    await enqueue(chatId, null, `[Переключить проект] ${tag}`);
+    return;
+  }
 
-  } else if (action === 'take') {
-    const r = await pool.query(`SELECT title, description FROM dev_tasks WHERE tag=$1 AND status='pending'`, [tag]);
-    if (r.rowCount === 0) {
-      await answerCallback(callbackQuery.id, '⚠️ Задача уже взята или не найдена');
-      return;
+  // reboot:yes|cancel — подтверждение перезагрузки VPS
+  if (action === 'reboot') {
+    await apiCall('deleteMessage', { chat_id: chatId, message_id: msgId }).catch(() => {});
+    if (tag === 'yes') {
+      await answerCallback(callbackQuery.id, '🔄 Перезагружаю…');
+      await send(chatId, '🔄 Сохраняю снимок проекта и перезагружаю VPS…');
+      // Claude (на хосте) выполняет снапшот + reboot; после загрузки поднимется сам.
+      await enqueue(chatId, null,
+        '[Перезагрузка VPS] Запусти scripts/reboot-vps.sh — он сделает снапшот проекта и перезагрузит VPS. ' +
+        'После перезагрузки claude-autostart.service поднимет сессию заново.');
+    } else {
+      await answerCallback(callbackQuery.id, 'Отменено');
     }
-    const { description } = r.rows[0];
-    await answerCallback(callbackQuery.id, '🔧 Берём в работу...');
-    await apiCall('deleteMessage', { chat_id: chatId, message_id: msgId });
-    await enqueue(chatId, null, `Берём задачу #${tag} в работу: ${description}`);
-
-  } else if (action === 'reject') {
-    // Включаем режим сбора фидбека: следующее сообщение пользователя
-    // (текст + опц. фото/видео) станет описанием «что не так».
-    // Состояние в Redis → переживает рестарт devbot. TTL 1 час.
-    await redis.set(`tg:feedback:${chatId}`, tag, { EX: 3600 });
-    await answerCallback(callbackQuery.id, '🔄 Опиши, что не так');
-    await apiCall('deleteMessage', { chat_id: chatId, message_id: msgId });
-    await send(chatId,
-      `🔄 Возвращаю <code>#${tag}</code> в работу.\n` +
-      `Опиши, <b>что именно не так</b> — следующим сообщением. Можно приложить фото/видео.`);
+    return;
   }
 }
 
