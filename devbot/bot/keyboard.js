@@ -17,13 +17,14 @@ const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫', cs: '🤖' };
 // Меню выбора проекта строится ДИНАМИЧЕСКИ из Redis-хэша cs:projects (id→имя),
 // который пишет мост из scripts/projects.sh. Добавление проекта не требует
 // пересборки devbot. Возвращает null, если реестр пуст (мост не запущен).
-async function projectMenuInline(redis) {
+// В тексте кнопки — иконка, имя и КОД проекта; текущий помечается галочкой.
+async function projectMenuInline(redis, current) {
   const map = await redis.hGetAll('cs:projects').catch(() => ({}));
   const ids = Object.keys(map || {}).sort();
   if (ids.length === 0) return null;
   return {
     inline_keyboard: ids.map(id => [{
-      text: `${PROJECT_ICONS[id] || '📁'} ${map[id]}`,
+      text: `${id === current ? '✅ ' : ''}${PROJECT_ICONS[id] || '📁'} ${map[id]} · ${id}`,
       callback_data: `proj:${id}`,
     }]),
   };

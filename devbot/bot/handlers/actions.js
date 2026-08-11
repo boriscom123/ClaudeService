@@ -62,9 +62,15 @@ async function runMenuAction(chatId, action) {
       await send(chatId, '📸 Запускаю снапшот документации…');
       break;
     case 'project': {
-      const menu = await projectMenuInline(redis);
+      const map = await redis.hGetAll('cs:projects').catch(() => ({}));
+      const current = await redis.get('cs:current').catch(() => null);
+      const menu = await projectMenuInline(redis, current);
       if (!menu) { await send(chatId, '⚠️ Список проектов пуст (мост не запущен?).'); break; }
+      const curLine = current && map[current]
+        ? `📌 Текущий проект: <b>${map[current]}</b> (<code>${current}</code>)`
+        : '📌 Текущий проект: <i>неизвестен</i>';
       await send(chatId,
+        `${curLine}\n\n` +
         '📁 <b>Переключить проект</b>\n\n' +
         'Claude перезапустится в выбранном проекте. ' +
         'Контекст текущей сессии будет потерян — не переключайтесь посреди незавершённой задачи.\n\n' +
