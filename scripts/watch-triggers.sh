@@ -22,14 +22,16 @@ SESSION="${CLAUDE_SESSION:-claude}"
 redis_cmd() { docker exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null; }
 tmux_cmd()  { tmux -S "$TMUX_SOCK" "$@"; }
 
-# Публикация реестра проектов в Redis (HASH cs:projects id→имя). Отсюда devbot
-# строит меню «Проект», валидирует коды кросс-проектной адресации и показывает имена.
+# Публикация реестра проектов в Redis (HASH cs:projects id→имя) и текущего
+# проекта (cs:current). Отсюда devbot строит меню «Проект», валидирует коды
+# кросс-проектной адресации, показывает имена и текущий проект.
 # Единый источник правды — projects.sh; добавление проекта не требует пересборки devbot.
 publish_projects() {
   local args=() id
   for id in $(project_list); do args+=("$id" "$(project_name "$id")"); done
   redis_cmd DEL cs:projects >/dev/null 2>&1
   [ ${#args[@]} -gt 0 ] && redis_cmd HSET cs:projects "${args[@]}" >/dev/null 2>&1
+  redis_cmd SET cs:current "$(project_current)" >/dev/null 2>&1
 }
 
 # Системное уведомление пользователю (например, Claude не запущен).
