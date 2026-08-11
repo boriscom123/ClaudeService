@@ -1,0 +1,34 @@
+# ClaudeService — центральный сервис (devbot + Redis), рядом с проектами.
+# Postgres не используется: весь стейт в Redis.
+# Публичный nginx (в стеке проекта) проксирует /devbot/webhook в devbot по сети claude-net.
+#   docker network create claude-net   # разово
+#   docker compose up -d --build
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: claudeservice-redis-1
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks: [claude-net]
+
+  devbot:
+    build: ./devbot
+    container_name: claudeservice-devbot-1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on: [redis]
+    volumes:
+      - /tmp/devbot-attachments:/attachments
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [claude-net]
+
+volumes:
+  redis_data:
+
+networks:
+  claude-net:
+    external: true
