@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram→Claude tmux bridge
+After=docker.service claude-autostart.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=boris
+EnvironmentFile=/home/boris/projects/ClaudeService/.env
+ExecStart=/home/boris/projects/ClaudeService/scripts/watch-triggers.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

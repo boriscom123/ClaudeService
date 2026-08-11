@@ -3,6 +3,9 @@
 # Claude вызывает это ПОСЛЕ выполнения задачи, пришедшей с префиксом [TG].
 # Мост (watch-triggers.sh) больше не ждёт и не скрапит ответ — доставка только тут.
 #
+# Скрипт живёт в ClaudeService/scripts и симлинкается в проекты — реальный путь
+# (и .env рядом) резолвится через readlink, поэтому работает через симлинк.
+#
 # Использование:
 #   scripts/tg-send.sh "Готово: исправил X, проверил Y."
 #   scripts/tg-send.sh "<текст>" <chat_id>     # необязательный явный chat_id
@@ -10,8 +13,10 @@
 # Текст идёт с parse_mode=HTML — экранируй < > & или используй простой текст.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/claude-service.conf"   # PROJECT_DIR, ENV_FILE, контейнеры, tmux, pg
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+ENV_FILE="${CS_ENV_FILE:-$SCRIPT_DIR/../.env}"
+REDIS_CONTAINER="${CS_REDIS_CONTAINER:-claudeservice-redis-1}"
 TEXT="${1:?usage: tg-send.sh <text> [chat_id]}"
 
 # Безопасно читаем только нужные ключи (не сорсим весь .env)
@@ -31,14 +36,12 @@ resp=$(curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
         '{chat_id:$chat_id, text:$text, parse_mode:"HTML"}')")
 
 if [ "$(echo "$resp" | jq -r '.ok' 2>/dev/null)" = "true" ]; then
-  # Записываем msg_id в telegram_bot_messages, чтобы «🗑️ Очистить чат»
-  # удалял и эти исходящие (devbot.clearMessages читает эту таблицу).
+  # Трекаем msg_id в Redis (cs:msgids:<chat>), чтобы «🗑️ Очистить чат»
+  # удалял и эти исходящие (devbot.clearMessages читает этот список).
   msg_id=$(echo "$resp" | jq -r '.result.message_id')
   if [ -n "$msg_id" ] && [ "$msg_id" != "null" ]; then
-    docker exec "${POSTGRES_CONTAINER}" \
-      psql -U "${PG_USER}" -d "${PG_DB}" \
-      -c "INSERT INTO telegram_bot_messages (chat_id, message_id) VALUES (${CHAT}, ${msg_id});" \
-      >/dev/null 2>&1
+    docker exec -i "$REDIS_CONTAINER" redis-cli RPUSH "cs:msgids:${CHAT}" "$msg_id" >/dev/null 2>&1
+    docker exec -i "$REDIS_CONTAINER" redis-cli LTRIM "cs:msgids:${CHAT}" -500 -1 >/dev/null 2>&1
   fi
   echo "tg-send: ok (msg ${msg_id})"
 else

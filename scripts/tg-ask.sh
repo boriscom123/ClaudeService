@@ -3,12 +3,18 @@
 # Нажатие варианта → выбор возвращается Claude в очередь (tg:queue).
 # «Свой вариант» → бот ждёт свободный текст и тоже отдаёт его Claude.
 #
+# Скрипт живёт в ClaudeService/scripts и симлинкается в проекты — реальный путь
+# (и .env рядом) резолвится через readlink, поэтому работает через симлинк.
+#
 # Использование:
 #   scripts/tg-ask.sh "Вопрос?" "Вариант 1" "Вариант 2" "Вариант 3"
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/claude-service.conf"   # PROJECT_DIR, ENV_FILE, контейнеры, tmux, pg
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+ENV_FILE="${CS_ENV_FILE:-$SCRIPT_DIR/../.env}"
+REDIS_CONTAINER="${CS_REDIS_CONTAINER:-claudeservice-redis-1}"
+
 get_env() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"'\r'; }
 TOKEN="$(get_env DEVBOT_TOKEN)"
 CHAT="$(get_env TELEGRAM_ADMIN_CHAT_ID)"
@@ -21,7 +27,7 @@ ASK_ID="$(date +%s%N)"
 
 # Сохранить варианты (JSON-массив) в Redis, TTL 1ч — для разбора callback.
 OPTS_JSON=$(printf '%s\n' "$@" | jq -R . | jq -s .)
-docker exec -i "${REDIS_CONTAINER}" \
+docker exec -i "$REDIS_CONTAINER" \
   redis-cli SET "tg:ask:${ASK_ID}" "$OPTS_JSON" EX 3600 >/dev/null
 
 # Номер-эмодзи: для нумерации в тексте и коротких кнопок (кнопки обрезаются — текст нет).
@@ -58,12 +64,11 @@ resp=$(curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
   -d "$(jq -n --argjson chat_id "$CHAT" --arg text "$text" --argjson kb "$buttons" \
         '{chat_id:$chat_id, text:$text, parse_mode:"HTML", reply_markup:{inline_keyboard:$kb}}')")
 
-# Трекаем msg_id, чтобы «🗑️ Очистить чат» его удалял.
+# Трекаем msg_id в Redis, чтобы «🗑️ Очистить чат» его удалял.
 msg_id=$(echo "$resp" | jq -r '.result.message_id')
 if [ -n "$msg_id" ] && [ "$msg_id" != "null" ]; then
-  docker exec -i "${POSTGRES_CONTAINER}" \
-    psql -U "${PG_USER}" -d "${PG_DB}" \
-    -c "INSERT INTO telegram_bot_messages (chat_id, message_id) VALUES (${CHAT}, ${msg_id});" >/dev/null 2>&1
+  docker exec -i "$REDIS_CONTAINER" redis-cli RPUSH "cs:msgids:${CHAT}" "$msg_id" >/dev/null 2>&1
+  docker exec -i "$REDIS_CONTAINER" redis-cli LTRIM "cs:msgids:${CHAT}" -500 -1 >/dev/null 2>&1
 fi
 
 if [ "$(echo "$resp" | jq -r '.ok')" = "true" ]; then
