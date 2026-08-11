@@ -1,17 +1,38 @@
 const { send, clearMessages } = require('../sender');
 const { getVpsStatus } = require('./vps');
 const { enqueue, redis } = require('../../claude/queue');
-const { MAIN_MENU_INLINE, projectMenuInline } = require('../keyboard');
+const { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline } = require('../keyboard');
 
-// Справка формируется ДИНАМИЧЕСКИ: список кодов проектов берём из того же
-// Redis-хэша cs:projects, что и меню «Проект». Так справка не разъезжается
-// при добавлении/удалении проекта (единый источник правды — scripts/projects.sh).
+// Описания кнопок по их лейблу. Раздел «Кнопки» в справке строится из самой
+// нижней клавиатуры (WELCOME_KEYBOARD), поэтому справка не расходится с ней при
+// изменении набора кнопок. Держим здесь и лейблы, которых сейчас нет на
+// клавиатуре — если кнопку вернут, описание подхватится автоматически.
+const BUTTON_HELP = {
+  '💻 Информация о VPS': 'CPU/RAM/диск/контейнеры',
+  '💻 Статус VPS': 'CPU/RAM/диск/контейнеры',
+  '🔀 Фиксация на git': 'commit + push',
+  '🔀 Фиксировать git': 'commit + push',
+  '📁 Проект': 'переключить Claude между проектами VPS',
+  '📸 Снапшот': 'снимок документации проекта на VPS + Google Drive',
+  '🔄 Перезагрузить VPS': 'снимок + перезагрузка сервера (Claude вернётся сам)',
+  '🗑️ Очистить чат': 'удалить сообщения бота',
+  '❓ Справка': 'это сообщение',
+  '❓ Помощь': 'это сообщение',
+};
+
+// Справка формируется ДИНАМИЧЕСКИ: коды проектов — из Redis-хэша cs:projects
+// (тот же источник, что и меню «Проект»), а список кнопок — из WELCOME_KEYBOARD.
+// Так справка не разъезжается ни при добавлении проекта, ни при смене кнопок.
 async function buildHelpText() {
   const map = await redis.hGetAll('cs:projects').catch(() => ({}));
   const ids = Object.keys(map || {}).sort();
   const codesLine = ids.length
     ? ids.map(id => `<code>${id}</code> — ${map[id]}`).join(', ')
     : 'см. меню 📁 Проект';
+  const buttonsSection = WELCOME_KEYBOARD.keyboard
+    .flat()
+    .map(label => (BUTTON_HELP[label] ? `${label} — ${BUTTON_HELP[label]}` : label))
+    .join('\n');
   return (
     `<b>🤖 DevBot — сервисный бот для Claude</b>\n` +
     `Персональный мост к Claude CLI на сервере.\n\n` +
@@ -23,14 +44,8 @@ async function buildHelpText() {
     `<code>!!!текст</code> — в приоритет очереди.\n` +
     `<code>!&lt;код&gt; текст</code> — в очередь другого проекта.\n` +
     `Коды проектов: ${codesLine}.\n\n` +
-    `<b>🔘 Кнопки меню</b>\n` +
-    `💻 Информация о VPS — CPU/RAM/диск/контейнеры\n` +
-    `🔀 Фиксация на git — commit + push\n` +
-    `📁 Проект — переключить Claude между проектами VPS\n` +
-    `📸 Снапшот — снимок документации проекта на VPS + Google Drive\n` +
-    `🔄 Перезагрузить VPS — снимок + перезагрузка сервера (Claude вернётся сам)\n` +
-    `🗑️ Очистить чат — удалить сообщения бота\n` +
-    `❓ Справка — это сообщение\n\n` +
+    `<b>🔘 Кнопки клавиатуры</b>\n` +
+    `${buttonsSection}\n\n` +
     `<b>Команды</b>\n` +
     `/start — приветствие и клавиатура\n` +
     `/help — эта справка`
