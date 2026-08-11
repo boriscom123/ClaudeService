@@ -12,6 +12,7 @@ declare -A PROJECT_DIRS=(
   [game]="/home/boris/projects/game_world_tycoon_idle"
   [cm]="/home/boris/projects/cross_messenger"
   [uq]="/home/boris/projects/uzbek_queue"
+  [cs]="/home/boris/projects/ClaudeService"
 )
 
 # Человекочитаемые имена — для сообщений в Telegram.
@@ -19,6 +20,7 @@ declare -A PROJECT_NAMES=(
   [game]="World Tycoon Idle"
   [cm]="Cross Messenger"
   [uq]="Uzbek Queue"
+  [cs]="Claude Service"
 )
 
 # Путь к проекту. Печатает пусто и возвращает 1, если id неизвестен.
