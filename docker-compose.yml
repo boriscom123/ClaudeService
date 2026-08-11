@@ -16,12 +16,17 @@ services:
     build: ./devbot
     container_name: claudeservice-devbot-1
     restart: unless-stopped
-    env_file: .env
+    # .env НЕ через env_file (снимок при создании), а bind-mount каталогом:
+    # config.js перечитывает токен/админа/webhook из /cs-root/.env на лету,
+    # поэтому смена значений в .env НЕ требует пересоздания контейнера.
+    # Redis — статикой (соединение живёт с запуска, на лету не переключить).
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      CS_ENV_FILE: /cs-root/.env
     depends_on: [redis]
     volumes:
+      - ./:/cs-root:ro
       - /tmp/devbot-attachments:/attachments
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [claude-net]
