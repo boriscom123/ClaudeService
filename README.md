@@ -90,6 +90,9 @@ sudo bash scripts/install-systemd.sh
 
 Или одной командой: `bash install.sh` (Linux/VPS).
 
+**Перенос на другой VPS** (кросс-проектный чеклист — все проекты + этот сервис):
+`docs/vps-migration.md`.
+
 **Windows (Docker Desktop):** контейнерную часть (redis + devbot) поднимает
 `powershell -ExecutionPolicy Bypass -File .\install.ps1`. Host-оркестрация
 (systemd-мост, tmux-сессия `claude`, автостарт, симлинки) — только Linux/VPS;
