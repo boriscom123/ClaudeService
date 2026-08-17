@@ -13,8 +13,7 @@ const BUTTON_HELP = {
   '🔀 Фиксация на git': 'commit + push',
   '🔀 Фиксировать git': 'commit + push',
   '📁 Проект': 'переключить Claude между проектами VPS',
-  '📸 Снапшот': 'снимок документации проекта на VPS + Google Drive',
-  '🔄 Перезагрузить VPS': 'снимок + перезагрузка сервера (Claude вернётся сам)',
+  '🔄 Перезагрузить VPS': 'перезагрузка сервера (Claude вернётся сам)',
   '🗑️ Очистить чат': 'удалить сообщения бота',
   '❓ Справка': 'это сообщение',
   '❓ Помощь': 'это сообщение',
@@ -82,12 +81,6 @@ async function runMenuAction(chatId, action) {
       await send(chatId, `🗑️ Удалено ${n} сообщений.`);
       break;
     }
-    case 'snapshot':
-      await enqueue(chatId, null,
-        '[Снапшот] Запусти scripts/daily-snapshot.sh (версионированный снапшот документации на VPS) ' +
-        'и выгрузи свежий снапшот на Google Drive, затем подтверди через scripts/tg-send.sh.');
-      await send(chatId, '📸 Запускаю снапшот документации…');
-      break;
     case 'project': {
       const map = await redis.hGetAll('cs:projects').catch(() => ({}));
       const current = await redis.get('cs:current').catch(() => null);

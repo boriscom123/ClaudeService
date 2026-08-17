@@ -5,7 +5,7 @@
 const MAIN_MENU_INLINE = {
   inline_keyboard: [
     [{ text: '💻 Статус VPS', callback_data: 'm:vps' }, { text: '🔀 Фиксировать git', callback_data: 'm:git' }],
-    [{ text: '📸 Снапшот', callback_data: 'm:snapshot' }, { text: '🗑️ Очистить чат', callback_data: 'm:clear' }],
+    [{ text: '🗑️ Очистить чат', callback_data: 'm:clear' }],
     [{ text: '📁 Проект', callback_data: 'm:project' }, { text: '🔄 Перезагрузить VPS', callback_data: 'm:reboot' }],
     [{ text: '❓ Помощь', callback_data: 'm:help' }],
   ],

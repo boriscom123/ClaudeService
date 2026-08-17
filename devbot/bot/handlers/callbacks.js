@@ -51,10 +51,10 @@ async function handleCallback(callbackQuery) {
     await apiCall('deleteMessage', { chat_id: chatId, message_id: msgId }).catch(() => {});
     if (tag === 'yes') {
       await answerCallback(callbackQuery.id, '🔄 Перезагружаю…');
-      await send(chatId, '🔄 Сохраняю снимок проекта и перезагружаю VPS…');
-      // Claude (на хосте) выполняет снапшот + reboot; после загрузки поднимется сам.
+      await send(chatId, '🔄 Перезагружаю VPS…');
+      // Claude (на хосте) выполняет reboot; после загрузки поднимется сам.
       await enqueue(chatId, null,
-        '[Перезагрузка VPS] Запусти scripts/reboot-vps.sh — он сделает снапшот проекта и перезагрузит VPS. ' +
+        '[Перезагрузка VPS] Запусти scripts/reboot-vps.sh — он перезагрузит VPS. ' +
         'После перезагрузки claude-autostart.service поднимет сессию заново.');
     } else {
       await answerCallback(callbackQuery.id, 'Отменено');

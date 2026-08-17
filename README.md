@@ -3,7 +3,7 @@
 Центральный сервис-мост **Telegram ↔ Claude Code CLI** на сервере. Живёт **рядом с
 проектами** (`/home/boris/projects/ClaudeService`), а не внутри какого-либо из них, и
 обслуживает их все: чат с Claude, очередь задач с приоритетом, переключение проектов,
-мониторинг VPS, git-операции, снапшоты.
+мониторинг VPS, git-операции.
 
 ## Архитектура (push-модель)
 
@@ -64,7 +64,7 @@ tmux-сессию и поднимает новую под тем же имене
 | `scripts/projects.sh` | реестр проектов (единый источник правды) |
 | `scripts/tg-send.sh` | отправка итога пользователю |
 | `scripts/tg-ask.sh` | вопрос с inline-кнопками вариантов |
-| `scripts/reboot-vps.sh` | снапшот + перезагрузка VPS |
+| `scripts/reboot-vps.sh` | перезагрузка VPS |
 | `scripts/systemd/` | юниты `tg-bridge`, `claude-autostart` |
 | `deploy/` | nginx-сниппет, `.env.example` |
 
