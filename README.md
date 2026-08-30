@@ -90,6 +90,9 @@ sudo bash scripts/install-systemd.sh
 
 Или одной командой: `bash install.sh` (Linux/VPS).
 
+**Собрать сервис с нуля через сессию Claude** (плейбук промптов для чистого VPS,
+универсальный — не привязан к пользователю): `docs/vps-rebuild-prompts.md`.
+
 **Перенос на другой VPS** (кросс-проектный чеклист — все проекты + этот сервис):
 `docs/vps-migration.md`.
 
