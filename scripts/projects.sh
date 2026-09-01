@@ -13,6 +13,8 @@ declare -A PROJECT_DIRS=(
   [cm]="/home/boris/projects/cross_messenger"
   [uq]="/home/boris/projects/uzbek_queue"
   [cs]="/home/boris/projects/ClaudeService"
+  [mp]="/home/boris/projects/myproject"
+  [pt]="/home/boris/projects/my-portal"
 )
 
 # Человекочитаемые имена — для сообщений в Telegram.
@@ -21,6 +23,8 @@ declare -A PROJECT_NAMES=(
   [cm]="Cross Messenger"
   [uq]="Uzbek Queue"
   [cs]="Claude Service"
+  [mp]="MyProject"
+  [pt]="Портал уроков"
 )
 
 # Путь к проекту. Печатает пусто и возвращает 1, если id неизвестен.

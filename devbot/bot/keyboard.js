@@ -12,7 +12,7 @@ const MAIN_MENU_INLINE = {
 };
 
 // Иконки проектов по id (дефолт — 📁). Имена берём из cs:projects.
-const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫', cs: '🤖' };
+const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫', cs: '🤖', mp: '📝', pt: '🎬' };
 
 // Меню выбора проекта строится ДИНАМИЧЕСКИ из Redis-хэша cs:projects (id→имя),
 // который пишет мост из scripts/projects.sh. Добавление проекта не требует
