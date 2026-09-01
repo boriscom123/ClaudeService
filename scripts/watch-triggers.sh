@@ -206,6 +206,10 @@ inject_message() {
   fi
   inject_text="[TG] ${inject_text}"
 
+  # Сообщение пользователя — в историю проекта. Пишем текст как он есть,
+  # без служебного префикса [TG]: в файле истории он только мешает.
+  "$SCRIPT_DIR/history-log.sh" in "${text:-$inject_text}" 2>/dev/null || true
+
   echo "[tg-bridge] Injecting: ${inject_text:0:100}..."
 
   # Безопасная инъекция: load-buffer корректно обрабатывает кавычки, $, backtick.

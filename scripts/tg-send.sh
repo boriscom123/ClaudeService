@@ -43,6 +43,9 @@ if [ "$(echo "$resp" | jq -r '.ok' 2>/dev/null)" = "true" ]; then
     docker exec -i "$REDIS_CONTAINER" redis-cli RPUSH "cs:msgids:${CHAT}" "$msg_id" >/dev/null 2>&1
     docker exec -i "$REDIS_CONTAINER" redis-cli LTRIM "cs:msgids:${CHAT}" -500 -1 >/dev/null 2>&1
   fi
+  # Ответ ушёл пользователю — записываем его в историю проекта.
+  # Скрипт сам решит, включена ли запись в текущем проекте.
+  "$SCRIPT_DIR/history-log.sh" out "$TEXT" 2>/dev/null || true
   echo "tg-send: ok (msg ${msg_id})"
 else
   echo "tg-send: FAIL → $resp" >&2

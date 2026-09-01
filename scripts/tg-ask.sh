@@ -72,6 +72,9 @@ if [ -n "$msg_id" ] && [ "$msg_id" != "null" ]; then
 fi
 
 if [ "$(echo "$resp" | jq -r '.ok')" = "true" ]; then
+  # В историю кладём вопрос вместе с нумерованными вариантами — так читателю
+  # понятно, из чего выбирали, а не только что выбрали.
+  "$SCRIPT_DIR/history-log.sh" out "$text" 2>/dev/null || true
   echo "tg-ask: ok (id=${ASK_ID})"
 else
   echo "tg-ask: FAIL → $resp" >&2
