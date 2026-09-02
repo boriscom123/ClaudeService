@@ -60,3 +60,64 @@ project_set_current() {
   project_dir "$id" >/dev/null || return 1
   printf '%s\n' "$id" > "$CURRENT_PROJECT_FILE"
 }
+
+# Каталог самих скриптов ClaudeService (файл сорсится, поэтому резолвим свой
+# реальный путь, а не путь вызывающего). Нужен для симлинков обратной связи.
+CS_SCRIPTS_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+# Блок контракта [TG] для CLAUDE.md проекта. Без него свежая сессия не знает,
+# что итог надо отправлять скриптом, — сообщения принимаются, ответов нет.
+_tg_contract_block() {
+  cat <<'BLOCK'
+
+<!-- claude-service:tg-contract -->
+## Обратная связь в Telegram
+
+Сообщения из Telegram приходят с префиксом `[TG]`. Мост только инжектит их в
+сессию — ответ с экрана он НЕ читает. Итог пользователю отправляешь ты сам:
+
+```bash
+scripts/tg-send.sh "краткий итог 1-2 предложения"
+```
+
+- Варианты действий — через `scripts/tg-ask.sh "Вопрос?" "Вариант 1" "Вариант 2"`
+  (inline-кнопки + «✍️ Свой вариант»); выбор вернётся как `[Выбор пользователя] …`.
+- Долгие задачи не обрезаются — шли итог, когда действительно закончил.
+- Можно слать промежуточный статус и финал разными сообщениями.
+<!-- /claude-service:tg-contract -->
+BLOCK
+}
+
+# Идемпотентно чинит обратную связь в каталоге проекта: симлинки на tg-send.sh
+# и tg-ask.sh + контракт [TG] в CLAUDE.md.
+#
+# Зачем: добавление проекта в PROJECT_DIRS само по себе даёт только доставку
+# сообщений В сессию. Ответы уходят лишь из проекта, где лежат эти симлинки и
+# описан контракт. Раньше это делалось руками по README и забывалось на новых
+# проектах (mp, pt) — переключение выглядело как «бот оглох».
+#
+# Где используется: switch-project.sh и start-claude.sh — перед запуском сессии.
+# Проверить состояние всех проектов: scripts/check-bridge.sh
+project_ensure_bridge() {
+  local id="${1:-}" dir
+  dir="$(project_dir "$id")" || return 1
+  [ -d "$dir" ] || return 1
+
+  mkdir -p "$dir/scripts" || return 1
+  local s
+  for s in tg-send.sh tg-ask.sh; do
+    if [ "$(readlink -f "$dir/scripts/$s" 2>/dev/null)" != "$CS_SCRIPTS_DIR/$s" ]; then
+      ln -sfn "$CS_SCRIPTS_DIR/$s" "$dir/scripts/$s" || return 1
+      echo "[bridge] $id: создан симлинк scripts/$s" >&2
+    fi
+  done
+
+  # CLAUDE.md: дописываем блок, если про tg-send.sh там ничего нет.
+  # Проверяем по имени скрипта, а не по маркеру: в game/uq контракт написан
+  # вручную и своими словами — переписывать его нечего.
+  if ! grep -q 'tg-send.sh' "$dir/CLAUDE.md" 2>/dev/null; then
+    _tg_contract_block >> "$dir/CLAUDE.md" || return 1
+    echo "[bridge] $id: контракт [TG] дописан в CLAUDE.md" >&2
+  fi
+  return 0
+}

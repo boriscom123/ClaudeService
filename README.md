@@ -75,6 +75,7 @@ tmux-сессию и поднимает новую под тем же имене
 | `scripts/start-claude.sh` | автостарт сессии после ребута (`claude-autostart`) |
 | `scripts/projects.sh` | реестр проектов (единый источник правды) |
 | `scripts/tg-send.sh` | отправка итога пользователю |
+| `scripts/check-bridge.sh` | аудит обратной связи по всем проектам реестра |
 | `scripts/tg-ask.sh` | вопрос с inline-кнопками вариантов |
 | `scripts/history-log.sh` | запись диалога в `docs/history/` проекта (по флагу) |
 | `scripts/reboot-vps.sh` | перезагрузка VPS |
@@ -130,7 +131,19 @@ sudo bash scripts/install-systemd.sh
 
 ## Подключение проекта
 
-Проекту нужны лишь симлинки на скрипты обратной связи (Claude шлёт ими итог):
+Достаточно добавить строку в `PROJECT_DIRS` (`scripts/projects.sh`) — симлинки
+обратной связи и контракт `[TG]` в `CLAUDE.md` проект получает сам: их
+создаёт `project_ensure_bridge` при переключении (`switch-project.sh`) и при
+автостарте (`start-claude.sh`). Руками ничего доделывать не нужно.
+
+Проверить состояние всех проектов (что ответы уйдут отовсюду):
+
+```bash
+scripts/check-bridge.sh          # все проекты; ненулевой код = есть проблемы
+scripts/check-bridge.sh pt       # один проект
+```
+
+Если нужно подключить каталог вне реестра — те же симлинки руками:
 
 ```bash
 cd <project>/scripts

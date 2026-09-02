@@ -38,6 +38,10 @@ if $TMUX_CMD has-session -t "$SESSION" 2>/dev/null; then
   exit 0
 fi
 
+# Обратная связь текущего проекта — на случай, если каталог правили руками
+# или проект добавили в реестр между перезагрузками (см. project_ensure_bridge).
+project_ensure_bridge "$PROJECT_ID" || true
+
 # Create detached tmux session and start Claude
 $TMUX_CMD new-session -d -s "$SESSION" -c "$PROJECT_DIR"
 $TMUX_CMD send-keys -t "$SESSION" "$CLAUDE_BIN" Enter
