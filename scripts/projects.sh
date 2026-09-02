@@ -14,7 +14,7 @@ declare -A PROJECT_DIRS=(
   [uq]="/home/boris/projects/uzbek_queue"
   [cs]="/home/boris/projects/ClaudeService"
   [mp]="/home/boris/projects/myproject"
-  [pt]="/home/boris/projects/my-portal"
+  [pt]="/home/boris/projects/my_portal"
 )
 
 # Человекочитаемые имена — для сообщений в Telegram.
