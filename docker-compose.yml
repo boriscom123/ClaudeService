@@ -5,7 +5,8 @@
 #   docker compose up -d --build
 services:
   redis:
-    image: redis:7-alpine
+    # Redis 8: формат RDB совместим с 7-й, состояние бота переносится как есть.
+    image: redis:8.10-alpine
     container_name: claudeservice-redis-1
     restart: unless-stopped
     volumes:
