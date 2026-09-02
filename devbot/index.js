@@ -15,7 +15,14 @@ app.post('/webhook', async (req, res) => {
 
     // Авторизация: только owner (роли — следующая итерация)
     if (message.from?.id !== config.ownerId) {
-      console.log(`[devbot] Unauthorized: ${message.from?.id}`);
+      // Пишем не только отправителя, но и тип апдейта, чат и начало текста:
+      // по одному id нельзя отличить чужого человека от служебного апдейта
+      // (например, сообщения самого бота в группе) — а это разные причины.
+      console.log(
+        `[devbot] Unauthorized: from=${message.from?.id} is_bot=${message.from?.is_bot} ` +
+        `chat=${message.chat?.id}/${message.chat?.type} keys=${Object.keys(req.body).join(',')} ` +
+        `text=${JSON.stringify((message.text || '').slice(0, 40))} ожидался owner=${config.ownerId}`
+      );
       return;
     }
 
