@@ -412,6 +412,15 @@ scripts/reboot-vps.sh: source projects.sh; сначала tg-send.sh уведо�
 
 ---
 
+> **Актуально с 2026-09-02:** точка входа сервера больше не собирается внутри
+> проекта. Общий слой (nginx, общие postgres и redis, portainer) вынесен в
+> отдельный репозиторий ClaudeDocker: github.com/boriscom123/ClaudeDocker.
+> На чистом VPS порядок такой — создать сети `web`, `claude-net`, `shared-data`,
+> поднять ClaudeDocker, затем проекты. Каждый проект при этом имеет
+> самодостаточный compose (профиль `standalone`) и оверлей под VPS в
+> `ClaudeDocker/projects/`. Фаза ниже описывает прежнюю схему и оставлена
+> как справка по TLS.
+
 ## Фаза 6 — Домен, обратный прокси и TLS (Caddy)
 
 **🖐 Вручную** заранее: домен указывает на IP VPS (A-запись или `<IP>.nip.io`), порты 80/443 открыты.
