@@ -32,9 +32,39 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [claude-net]
 
+  # Свой сервер Telegram Bot API — глобальный для ботов этого сервера. Нужен
+  # тем, кому мало 50 МБ на файл от бота: в локальном режиме (TELEGRAM_LOCAL)
+  # он принимает файлы до 2000 МБ. Живёт здесь, а не в проекте: ботов на
+  # сервере несколько, сервер Bot API может быть один, а его ключи
+  # (my.telegram.org) — рядом с остальными ключами Telegram в .env.
+  # Проекты обращаются по полному имени: http://claudeservice-telegram-bot-api-1:8081
+  # (короткие имена в общих сетях однажды указали на два разных сервера).
+  # Сеть shared-data — потому что там живут воркеры проектов.
+  # Профиль bot-api: без ключей сервер уходит в перезапуски, а на машине без
+  # shared-data обычный `docker compose up` не должен ломаться. Запуск:
+  #   docker compose --profile bot-api up -d telegram-bot-api
+  # Бот переезжает на него после logOut у облачного Bot API — см. README.
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:10.3
+    container_name: claudeservice-telegram-bot-api-1
+    profiles: [bot-api]
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_LOCAL: "1"
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    networks: [claude-net, shared-data]
+
 volumes:
   redis_data:
+  telegram_bot_api_data:
 
 networks:
   claude-net:
+    external: true
+  # Общая сеть слоя ClaudeDocker: в ней воркеры проектов. Нужна только
+  # серверу Bot API (профиль bot-api).
+  shared-data:
     external: true

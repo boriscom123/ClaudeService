@@ -68,7 +68,7 @@ tmux-сессию и поднимает новую под тем же имене
 
 | Путь | Назначение |
 |------|-----------|
-| `docker-compose.yml` | devbot + Redis (сеть claude-net) |
+| `docker-compose.yml` | devbot + Redis (сеть claude-net); сервер Telegram Bot API (профиль `bot-api`) |
 | `devbot/` | Node-сервис: webhook, кнопки меню, очередь |
 | `scripts/watch-triggers.sh` | мост Redis→tmux (systemd `tg-bridge`) |
 | `scripts/switch-project.sh` | переключение проекта с верификацией |
@@ -116,6 +116,23 @@ sudo bash scripts/install-systemd.sh
 на Windows её нет, разворачивай эту часть на самом сервере.
 
 Проверка: `docker compose logs devbot --tail=5` и `systemctl is-active tg-bridge`.
+
+### Свой сервер Telegram Bot API
+
+Глобальный для ботов сервера: бот, которому мало 50 МБ на файл, шлёт через
+него до 2000 МБ. Ключи `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` — с my.telegram.org
+→ API development tools, вписываются в `.env` руками (не через Telegram:
+переписка уходит в публичные репозитории).
+
+```bash
+docker compose --profile bot-api up -d telegram-bot-api
+```
+
+Адрес для проектов (сеть `shared-data`): `http://claudeservice-telegram-bot-api-1:8081`.
+Перед переездом бота — `logOut` у облака:
+`curl -s https://api.telegram.org/bot<токен>/logOut`. После него бот сразу
+работает на своём сервере, а в облако вернуться может только через 10 минут.
+Смешивать облако и свой сервер для одного бота нельзя.
 
 ### Смена секретов без перезапуска
 
