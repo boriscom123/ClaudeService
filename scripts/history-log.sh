@@ -63,6 +63,11 @@ scrub() {
     -e 's/(secret|token|password|api[_-]?key)([[:space:]]*[=:][[:space:]]*)[^[:space:]]+/\1\2СКРЫТО/gI'
 }
 
+# Время и день — по Москве, а не по часам сервера: пользователь видит
+# сообщения в Telegram по московскому времени, и метки в истории должны с ними
+# совпадать. Сервер живёт по Берлину, и летом разница была ровно в час.
+export TZ=Europe/Moscow
+
 DAY="$(date +%Y-%m-%d)"
 FILE="$HISTORY_DIR/$DAY.md"
 mkdir -p "$HISTORY_DIR"
