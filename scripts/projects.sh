@@ -55,6 +55,43 @@ project_current() {
   printf '%s' "$id"
 }
 
+# id проекта, в каталоге (или подкаталоге) которого лежит путь DIR.
+# Печатает пусто и возвращает 1, если путь вне подключённых проектов
+# (например, сессию увели руками в ~/projects/skat).
+# Где используется: watch-triggers.sh — определение реального проекта сессии.
+project_by_dir() {
+  local path="${1:-}" id dir
+  [ -n "$path" ] || return 1
+  path="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
+  for id in "${!PROJECT_DIRS[@]}"; do
+    dir="${PROJECT_DIRS[$id]}"
+    if [ "$path" = "$dir" ] || [ "${path#"$dir"/}" != "$path" ]; then
+      printf '%s' "$id"; return 0
+    fi
+  done
+  return 1
+}
+
+# Реальный каталог Claude-сессии (cwd процесса на переднем плане панели).
+# Пусто, если сессии нет.
+project_session_dir() {
+  tmux -S "${TMUX_SOCK:-/tmp/tmux-1000/default}" display-message -p \
+    -t "${CLAUDE_SESSION:-claude}" '#{pane_current_path}' 2>/dev/null
+}
+
+# Проект, в котором РЕАЛЬНО работает сессия. Файл current-project для этого
+# не годится: сессию могут увести в неподключённый каталог (cd ~/projects/skat),
+# а файл так и останется на последнем подключённом проекте — кнопка этого
+# проекта отвечала «Уже на проекте», хотя переключиться было нужно.
+# Печатает id или пусто (сессия вне проектов). Без сессии — id из файла.
+# Где используется: watch-triggers.sh (переключение, очереди), history-log.sh.
+project_live() {
+  local dir
+  dir="$(project_session_dir)"
+  if [ -z "$dir" ]; then project_current; return; fi
+  project_by_dir "$dir" || true
+}
+
 project_set_current() {
   local id="${1:-}"
   project_dir "$id" >/dev/null || return 1

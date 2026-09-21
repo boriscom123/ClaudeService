@@ -3,6 +3,9 @@ const { getVpsStatus } = require('./vps');
 const { enqueue, redis } = require('../../claude/queue');
 const { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline } = require('../keyboard');
 
+// Экранирование для parse_mode HTML — путь каталога приходит из файловой системы.
+const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 // Описания кнопок по их лейблу. Раздел «Кнопки» в справке строится из самой
 // нижней клавиатуры (WELCOME_KEYBOARD), поэтому справка не расходится с ней при
 // изменении набора кнопок. Держим здесь и лейблы, которых сейчас нет на
@@ -83,12 +86,21 @@ async function runMenuAction(chatId, action) {
     }
     case 'project': {
       const map = await redis.hGetAll('cs:projects').catch(() => ({}));
+      // cs:current — реальный проект сессии (мост определяет его по каталогу
+      // tmux-панели); пусто, если сессию увели в неподключённый каталог.
+      // Тогда показываем сам каталог (cs:current_dir), а переключиться можно
+      // на любой проект из списка — кнопки строятся из того же реестра.
       const current = await redis.get('cs:current').catch(() => null);
+      const currentDir = await redis.get('cs:current_dir').catch(() => null);
       const menu = await projectMenuInline(redis, current);
       if (!menu) { await send(chatId, '⚠️ Список проектов пуст (мост не запущен?).'); break; }
-      const curLine = current && map[current]
-        ? `📌 Текущий проект: <b>${map[current]}</b> (<code>${current}</code>)`
-        : '📌 Текущий проект: <i>неизвестен</i>';
+      let curLine = '📌 Текущий проект: <i>неизвестен</i>';
+      if (current && map[current]) {
+        curLine = `📌 Текущий проект: <b>${map[current]}</b> (<code>${current}</code>)`;
+      } else if (currentDir) {
+        curLine = `📌 Сессия вне проектов: <code>${escapeHtml(currentDir)}</code>\n` +
+          'Выбери проект ниже — Claude перейдёт в него.';
+      }
       await send(chatId,
         `${curLine}\n\n` +
         '📁 <b>Переключить проект</b>\n\n' +

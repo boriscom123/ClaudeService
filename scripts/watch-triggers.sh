@@ -31,7 +31,21 @@ publish_projects() {
   for id in $(project_list); do args+=("$id" "$(project_name "$id")"); done
   redis_cmd DEL cs:projects >/dev/null 2>&1
   [ ${#args[@]} -gt 0 ] && redis_cmd HSET cs:projects "${args[@]}" >/dev/null 2>&1
-  redis_cmd SET cs:current "$(project_current)" >/dev/null 2>&1
+  LAST_LIVE_DIR=""   # форсируем публикацию cs:current/cs:current_dir
+  publish_current
+}
+
+# cs:current — id реального проекта сессии ("" — неподключённый каталог),
+# cs:current_dir — сам каталог (devbot показывает его в меню «Проект»).
+# Пишем в Redis только при смене каталога: зовётся на каждой итерации цикла.
+LAST_LIVE_DIR=""
+publish_current() {
+  local dir
+  dir="$(project_session_dir)"
+  [ "${dir:--}" = "$LAST_LIVE_DIR" ] && return
+  LAST_LIVE_DIR="${dir:--}"
+  redis_cmd SET cs:current "$(project_live)" >/dev/null 2>&1
+  redis_cmd SET cs:current_dir "$dir" >/dev/null 2>&1
 }
 
 # Системное уведомление пользователю (например, Claude не запущен).
@@ -144,7 +158,10 @@ handle_switch_project() {
     return 0
   fi
 
-  if [ "$target" = "$(project_current)" ]; then
+  # Сравниваем с реальным каталогом сессии, а не с файлом current-project:
+  # из неподключённого каталога (skat и т.п.) переключение на любой проект
+  # реестра должно работать. Мёртвую сессию тоже поднимаем заново.
+  if [ "$target" = "$(project_live)" ] && tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
     tg_send "$chat_id" "📁 Уже на проекте <b>$(project_name "$target")</b> — переключать нечего."
     return 0
   fi
@@ -234,6 +251,7 @@ main() {
     # Проверка лимита сессии Claude на каждой итерации (~каждые 2с).
     check_session_limit
     maybe_resume
+    publish_current
 
     local msg tier target proj
     msg=$(redis_cmd LPOP tg:queue 2>/dev/null || echo "")
@@ -249,7 +267,8 @@ main() {
       else
         # Цель: валидный target_project (кросс-проект) либо текущий проект.
         proj="$target"
-        if [ -z "$proj" ] || ! project_dir "$proj" >/dev/null; then proj="$(project_current)"; fi
+        if [ -z "$proj" ] || ! project_dir "$proj" >/dev/null; then proj="$(project_live)"; fi
+        [ -n "$proj" ] || proj="$(project_current)"
         if [ "$tier" = "prio" ]; then
           redis_cmd RPUSH "tg:hold:prio:$proj" "$msg" >/dev/null 2>&1
           echo "[tg-bridge] Queued PRIORITY → $proj"
@@ -273,9 +292,12 @@ main() {
 
     if [ "$idle_streak" -ge 2 ] && tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
       local P held
-      P="$(project_current)"
-      held=$(redis_cmd LPOP "tg:hold:prio:$P" 2>/dev/null)
-      if [ -z "$held" ] || [ "$held" = "(nil)" ]; then
+      # Очередь проекта доставляем только в сессию, которая реально в нём:
+      # в чужом каталоге (skat) задачи проекта выполнились бы не там.
+      P="$(project_live)"
+      held=""
+      [ -n "$P" ] && held=$(redis_cmd LPOP "tg:hold:prio:$P" 2>/dev/null)
+      if [ -n "$P" ] && { [ -z "$held" ] || [ "$held" = "(nil)" ]; }; then
         held=$(redis_cmd LPOP "tg:hold:$P" 2>/dev/null)
       fi
       if [ -n "$held" ] && [ "$held" != "(nil)" ]; then
