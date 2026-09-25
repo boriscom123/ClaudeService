@@ -15,6 +15,8 @@ declare -A PROJECT_DIRS=(
   [cs]="/home/boris/projects/ClaudeService"
   [mp]="/home/boris/projects/myproject"
   [pt]="/home/boris/projects/my_portal"
+  [sk]="/home/boris/projects/skat"
+  [sbd]="/home/boris/projects/skat_bd"
 )
 
 # Человекочитаемые имена — для сообщений в Telegram.
@@ -25,6 +27,8 @@ declare -A PROJECT_NAMES=(
   [cs]="Claude Service"
   [mp]="MyProject"
   [pt]="Портал уроков"
+  [sk]="СКАТ"
+  [sbd]="СКАТ БД"
 )
 
 # Путь к проекту. Печатает пусто и возвращает 1, если id неизвестен.
