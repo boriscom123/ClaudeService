@@ -50,6 +50,7 @@ async function buildHelpText() {
     `${buttonsSection}\n\n` +
     `<b>Команды</b>\n` +
     `/start — приветствие и клавиатура\n` +
+    `/keyboard_update — обновить нижнюю клавиатуру\n` +
     `/help — эта справка`
   );
 }

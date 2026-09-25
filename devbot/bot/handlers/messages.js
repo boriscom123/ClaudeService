@@ -40,6 +40,24 @@ function classify(text, projects) {
   return { tier, text: rest.trim(), target };
 }
 
+// Отправить сообщение с нижней клавиатурой WELCOME_KEYBOARD и закрепить его.
+// Зачем: закреплённое сообщение пропускает «🗑️ Очистить чат» (clearMessages),
+// поэтому клавиатура переживает очистку; предыдущее такое сообщение удаляем
+// (id в Redis tg:welcome:<chatId>), чтобы в чате не копились дубли.
+// Используется командами /start, /menu и /keyboard_update.
+async function sendWelcome(chatId, text) {
+  const key = `tg:welcome:${chatId}`;
+  const prev = await redis.get(key).catch(() => null);
+  const wid = await send(chatId, text, { reply_markup: WELCOME_KEYBOARD });
+  if (!wid) return;
+  await redis.set(key, String(wid)).catch(() => {});
+  if (prev && prev !== String(wid)) {
+    await apiCall('deleteMessage', { chat_id: chatId, message_id: Number(prev) }).catch(() => {});
+  }
+  await apiCall('unpinAllChatMessages', { chat_id: chatId }).catch(() => {});
+  await apiCall('pinChatMessage', { chat_id: chatId, message_id: wid, disable_notification: true }).catch(() => {});
+}
+
 async function handleMessage(message) {
   const chatId = message.chat.id;
   const text = (message.text || message.caption || '').trim();
@@ -77,20 +95,21 @@ async function handleMessage(message) {
   }
 
   // /start, /menu — приветствие + клавиатура (кнопка ❓ Помощь).
-  // Закрепляем сообщение: «🗑️ Очистить чат» пропускает закреплённое
-  // (clearMessages), поэтому приветствие с клавиатурой переживает очистку.
   if (text === '/start' || text === '/menu') {
     // Успешную обработку тоже логируем: раньше в лог попадали только отказы,
     // и по молчанию нельзя было отличить «команда не дошла» от «дошла и
     // отработала» — разбор жалобы на пропавшую клавиатуру упёрся именно в это.
     console.log(`[devbot] ${text} от ${message.from?.id} — отправляю клавиатуру`);
-    const wid = await send(chatId,
-      '👋 <b>DevBot на связи.</b>\nПиши любой текст — отвечу через Claude.\nНажми <b>❓ Помощь</b> для справки.',
-      { reply_markup: WELCOME_KEYBOARD });
-    if (wid) {
-      await apiCall('unpinAllChatMessages', { chat_id: chatId }).catch(() => {});
-      await apiCall('pinChatMessage', { chat_id: chatId, message_id: wid, disable_notification: true }).catch(() => {});
-    }
+    await sendWelcome(chatId,
+      '👋 <b>DevBot на связи.</b>\nПиши любой текст — отвечу через Claude.\nНажми <b>❓ Помощь</b> для справки.');
+    return;
+  }
+  // /keyboard_update — переотправить нижнюю клавиатуру после изменения
+  // WELCOME_KEYBOARD (и пересборки devbot): клиент Telegram держит старую
+  // клавиатуру, пока бот не пришлёт новую. Старое сообщение-носитель удаляется.
+  if (text === '/keyboard_update') {
+    console.log(`[devbot] /keyboard_update от ${message.from?.id} — обновляю клавиатуру`);
+    await sendWelcome(chatId, '⌨️ <b>Клавиатура обновлена.</b>');
     return;
   }
   if (text === '/help') { await runMenuAction(chatId, 'help'); return; }
