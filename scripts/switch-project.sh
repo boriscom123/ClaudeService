@@ -3,8 +3,14 @@
 #
 #   scripts/switch-project.sh <game|cm>
 #
-# Убивает tmux-сессию и поднимает новую ПОД ТЕМ ЖЕ ИМЕНЕМ в каталоге проекта —
-# поэтому мост (watch-triggers.sh) ничего не замечает: он ищет сессию по имени.
+# Поднимает новую tmux-сессию в каталоге проекта, гасит старую и переименовывает
+# новую в прежнее имя — поэтому мост (watch-triggers.sh) ничего не замечает:
+# он ищет сессию по имени.
+#
+# Порядок «сначала новая, потом kill» обязателен: если убить ПОСЛЕДНЮЮ сессию,
+# tmux-сервер завершается (exit-empty), и new-session, успевший подключиться
+# к умирающему серверу, падает с «server exited unexpectedly» — сессий не
+# остаётся вовсе. Заодно при сбое запуска старая сессия остаётся жива.
 #
 # ВАЖНО: не запускать изнутри самой сессии Claude — скрипт убьёт себя вместе
 # с ней и не успеет поднять новую. Запускают: мост или человек из SSH.
@@ -21,11 +27,12 @@ SESSION="${CLAUDE_SESSION:-claude}"
 TMUX_SOCKET="/tmp/tmux-1000/default"
 TMUX_CMD="tmux -S $TMUX_SOCKET"
 
-# Есть ли в дереве процессов tmux-сессии реально запущенный процесс `claude`.
+# Есть ли в дереве процессов tmux-сессии $1 реально запущенный процесс `claude`.
 # Проверяем факт запуска процесса (а не UI в панели) — надёжнее и без ложных срабатываний.
+# Где используется: верификация новой сессии ниже.
 session_has_claude() {
-  local pane_pid
-  pane_pid=$($TMUX_CMD list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -1) || return 1
+  local sess="$1" pane_pid
+  pane_pid=$($TMUX_CMD list-panes -t "=$sess:" -F '#{pane_pid}' 2>/dev/null | head -1) || return 1
   [ -n "$pane_pid" ] || return 1
   local pids="$pane_pid" depth=0
   while [ -n "${pids// }" ] && [ "$depth" -lt 6 ]; do
@@ -71,28 +78,35 @@ fi
 # успешной верификации запуска — иначе рассинхрон (файл на новый, сессия на старый).
 PREV="$(project_current)"
 
-if $TMUX_CMD has-session -t "$SESSION" 2>/dev/null; then
-  echo "[switch] Гашу сессию '$SESSION'…"
-  $TMUX_CMD kill-session -t "$SESSION"
+# Новая сессия под временным именем; старая пока жива, сервер не пустеет.
+NEW_SESSION="${SESSION}-switch-$$"
+echo "[switch] Поднимаю '$NEW_SESSION' в $TARGET_DIR…"
+if ! $TMUX_CMD new-session -d -s "$NEW_SESSION" -c "$TARGET_DIR"; then
+  echo "[switch] ОШИБКА: tmux не создал сессию в $TARGET_DIR" >&2
+  exit 1
 fi
+$TMUX_CMD send-keys -t "=$NEW_SESSION:" "$CLAUDE_BIN" Enter
 
-echo "[switch] Поднимаю '$SESSION' в $TARGET_DIR…"
-$TMUX_CMD new-session -d -s "$SESSION" -c "$TARGET_DIR"
-$TMUX_CMD send-keys -t "$SESSION" "$CLAUDE_BIN" Enter
-
-# Верификация: ждём (до ~10с), что сессия существует И процесс claude реально поднялся.
+# Верификация: ждём (до ~10с), что процесс claude реально поднялся.
 ok=1
 for _ in $(seq 1 20); do
-  if $TMUX_CMD has-session -t "$SESSION" 2>/dev/null && session_has_claude; then ok=0; break; fi
+  if session_has_claude "$NEW_SESSION"; then ok=0; break; fi
   sleep 0.5
 done
 
 if [ "$ok" -ne 0 ]; then
-  echo "[switch] ОШИБКА: сессия/процесс claude не поднялись в $TARGET_DIR" >&2
-  # Откат: если сессия всё же жива, вернём указатель на прежний проект.
-  project_set_current "$PREV" 2>/dev/null || true
+  echo "[switch] ОШИБКА: процесс claude не поднялся в $TARGET_DIR — остаюсь на $(project_name "$PREV")" >&2
+  $TMUX_CMD kill-session -t "=$NEW_SESSION" 2>/dev/null || true
   exit 1
 fi
+
+if $TMUX_CMD has-session -t "=$SESSION" 2>/dev/null; then
+  echo "[switch] Гашу сессию '$SESSION'…"
+  # Подключённый клиент (SSH) не выкидывается, а переезжает в новую сессию.
+  $TMUX_CMD set-option -t "=$SESSION:" detach-on-destroy off 2>/dev/null || true
+  $TMUX_CMD kill-session -t "=$SESSION"
+fi
+$TMUX_CMD rename-session -t "=$NEW_SESSION" "$SESSION"
 
 project_set_current "$TARGET"
 echo "[switch] Готово: $(project_name "$TARGET") ($TARGET_DIR)"
