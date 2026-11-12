@@ -1,5 +1,5 @@
 [Unit]
-Description=Telegram→Claude tmux bridge
+Description=Telegram→Claude/Grok tmux bridge
 After=docker.service claude-autostart.service
 Wants=docker.service
 

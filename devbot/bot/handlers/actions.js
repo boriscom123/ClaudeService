@@ -1,7 +1,7 @@
 const { send, clearMessages } = require('../sender');
 const { getVpsStatus } = require('./vps');
 const { enqueue, redis } = require('../../claude/queue');
-const { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline } = require('../keyboard');
+const { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline, modelMenuInline } = require('../keyboard');
 
 // Экранирование для parse_mode HTML — путь каталога приходит из файловой системы.
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -15,7 +15,8 @@ const BUTTON_HELP = {
   '💻 Статус VPS': 'CPU/RAM/диск/контейнеры',
   '🔀 Фиксация на git': 'commit + push',
   '🔀 Фиксировать git': 'commit + push',
-  '📁 Проект': 'переключить Claude между проектами VPS',
+  '📁 Проект': 'переключить активную модель между проектами VPS',
+  '🧠 Модель': 'переключить Grok / Claude / ChatGPT Codex в том же проекте, контекст чата теряется',
   '🔄 Перезагрузить VPS': 'перезагрузка сервера (Claude вернётся сам)',
   '🗑️ Очистить чат': 'удалить сообщения бота',
   '❓ Справка': 'это сообщение',
@@ -36,11 +37,11 @@ async function buildHelpText() {
     .map(label => (BUTTON_HELP[label] ? `${label} — ${BUTTON_HELP[label]}` : label))
     .join('\n');
   return (
-    `<b>🤖 DevBot — сервисный бот для Claude</b>\n` +
-    `Персональный мост к Claude CLI на сервере.\n\n` +
-    `<b>💬 Общение с Claude</b>\n` +
-    `Просто напиши любой текст — он уйдёт напрямую в Claude, а ответ придёт сюда. ` +
-    `Можно прислать и фото/скриншот.\n\n` +
+    `<b>🤖 DevBot — сервисный бот для Claude, Grok и ChatGPT Codex</b>\n` +
+    `Персональный мост к сессии на сервере.\n\n` +
+    `<b>💬 Общение</b>\n` +
+    `Просто напиши любой текст — он уйдёт в активную модель (Claude, Grok или ChatGPT Codex), ` +
+    `а ответ придёт сюда. Можно прислать и фото/скриншот.\n\n` +
     `<b>➕ Очередь</b>\n` +
     `<code>!текст</code> — в очередь текущего проекта (выполнится по простою).\n` +
     `<code>!!!текст</code> — в приоритет очереди.\n` +
@@ -78,7 +79,7 @@ async function runMenuAction(chatId, action) {
       await enqueue(chatId, null,
         '[Фиксация на git] Закоммить в dev незафиксированные изменения, ' +
         'сформируй осмысленный commit message и запушь dev.');
-      await send(chatId, '🔀 Отправил Claude: коммит изменений в dev + push.');
+      await send(chatId, '🔀 Отправил в активную сессию: коммит изменений в dev + push.');
       break;
     case 'clear': {
       const n = await clearMessages(chatId);
@@ -100,21 +101,42 @@ async function runMenuAction(chatId, action) {
         curLine = `📌 Текущий проект: <b>${map[current]}</b> (<code>${current}</code>)`;
       } else if (currentDir) {
         curLine = `📌 Сессия вне проектов: <code>${escapeHtml(currentDir)}</code>\n` +
-          'Выбери проект ниже — Claude перейдёт в него.';
+          'Выбери проект ниже — активная модель перейдёт в него.';
       }
+      const modelId = await redis.get('cs:model').catch(() => null);
+      const models = await redis.hGetAll('cs:models').catch(() => ({}));
+      const modelName = modelId && models[modelId] ? models[modelId] : 'активная модель';
       await send(chatId,
-        `${curLine}\n\n` +
+        `${curLine}\n` +
+        `🧠 Модель: <b>${modelName}</b>\n\n` +
         '📁 <b>Переключить проект</b>\n\n' +
-        'Claude перезапустится в выбранном проекте. ' +
-        'Контекст текущей сессии будет потерян — не переключайтесь посреди незавершённой задачи.\n\n' +
+        `${modelName} перезапустится в выбранном проекте. Модель не меняется. ` +
+        'Контекст чата будет потерян.\n\n' +
         'Контейнеры проектов продолжат работать.',
+        { reply_markup: menu });
+      break;
+    }
+    case 'model': {
+      const models = await redis.hGetAll('cs:models').catch(() => ({}));
+      const current = await redis.get('cs:model').catch(() => null);
+      const projects = await redis.hGetAll('cs:projects').catch(() => ({}));
+      const project = await redis.get('cs:current').catch(() => null);
+      const menu = await modelMenuInline(redis, current);
+      if (!menu) { await send(chatId, '⚠️ Список моделей пуст (мост не запущен?).'); break; }
+      const modelName = current && models[current] ? models[current] : 'не выбрана';
+      const projName = project && projects[project] ? projects[project] : 'неизвестен';
+      await send(chatId,
+        `📌 Сейчас: <b>${modelName}</b>, проект <b>${projName}</b>\n\n` +
+        '🧠 <b>Переключить модель</b>\n\n' +
+        'В той же сессии и том же проекте запустится выбранная модель. ' +
+        'Контекст текущего чата будет потерян.',
         { reply_markup: menu });
       break;
     }
     case 'reboot':
       // Подтверждение — перезагрузка прерывает работу на ~1–2 минуты
       await send(chatId,
-        '🔄 <b>Перезагрузить VPS?</b>\nСохраню снимок проекта, перезагружу сервер, Claude вернётся автоматически после загрузки.',
+        '🔄 <b>Перезагрузить VPS?</b>\nСохраню снимок проекта, перезагружу сервер, активная модель вернётся автоматически после загрузки.',
         { reply_markup: { inline_keyboard: [[
           { text: '✅ Да, перезагрузить', callback_data: 'reboot:yes' },
           { text: '✖️ Отмена', callback_data: 'reboot:cancel' },

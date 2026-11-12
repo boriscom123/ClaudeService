@@ -11,7 +11,7 @@
 Telegram → nginx /devbot/webhook → devbot (Docker) → Redis tg:queue
                                                         │
                           watch-triggers.sh (systemd tg-bridge) маршрутизирует:
-                            now  → инжект в tmux "claude" сразу
+                            now  → инжект в tmux-сессию agent (окно main)
                             hold → tg:hold:<project>        (по простою сессии)
                             prio → tg:hold:prio:<project>   (раньше обычных)
                                                         │
@@ -59,10 +59,15 @@ webhook в devbot по общей docker-сети `claude-net`.
 
 Домашние пути, IP-адреса и всё похожее на токен заменяются заглушками (`history-log.sh`).
 
-Переключение: кнопка «📁 Проект» в боте или `scripts/switch-project.sh <id>`. Скрипт убивает
-tmux-сессию и поднимает новую под тем же именем `claude` в каталоге проекта, **проверяя**, что
-процесс `claude` реально стартовал; `~/.claude-current-project` пишется только после успеха
-(при провале — откат и внятная ошибка в Telegram).
+tmux-сессия называется `agent`, в ней одно окно `main` и один процесс: Grok или Claude.
+
+Переключение проекта: кнопка «📁 Проект» или `scripts/switch-project.sh <id>`. Та же модель
+перезапускается в каталоге проекта, контекст чата теряется. `~/.claude-current-project`
+пишется только после успеха.
+
+Переключение модели: кнопка «🧠 Модель». Тот же проект, процесс заменяется, контекст чата
+теряется. Выбор лежит в `~/.cs-current-model`. После обновления бота нижнюю клавиатуру
+обновляет `/keyboard_update`.
 
 ## Состав
 
@@ -99,7 +104,7 @@ docker network connect claude-net <nginx-container>
 # systemd-мост и автостарт:
 sudo bash scripts/install-systemd.sh
 
-# запусти tmux-сессию 'claude' с Claude CLI на хосте (её слушает мост)
+# запусти tmux-сессию 'agent' на хосте (её слушает мост; внутри Grok или Claude)
 ```
 
 Или одной командой: `bash install.sh` (Linux/VPS).
@@ -112,7 +117,7 @@ sudo bash scripts/install-systemd.sh
 
 **Windows (Docker Desktop):** контейнерную часть (redis + devbot) поднимает
 `powershell -ExecutionPolicy Bypass -File .\install.ps1`. Host-оркестрация
-(systemd-мост, tmux-сессия `claude`, автостарт, симлинки) — только Linux/VPS;
+(systemd-мост, tmux-сессия `agent`, автостарт, симлинки) — только Linux/VPS;
 на Windows её нет, разворачивай эту часть на самом сервере.
 
 Проверка: `docker compose logs devbot --tail=5` и `systemctl is-active tg-bridge`.

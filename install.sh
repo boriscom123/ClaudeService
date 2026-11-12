@@ -41,7 +41,7 @@ cat <<STEPS
    вставь блок из deploy/nginx.snippet.conf в server{} и перезагрузи nginx
 3) systemd-мост и автостарт:
      sudo bash scripts/install-systemd.sh
-4) Запусти tmux-сессию 'claude' с Claude CLI на хосте (её слушает мост).
+4) Запусти tmux-сессию 'agent' на хосте (её слушает мост; внутри Grok или Claude).
 5) Подключи проекты симлинками scripts/tg-send.sh и scripts/tg-ask.sh (см. README).
 6) Проверь: docker compose logs devbot --tail=5  и  systemctl is-active tg-bridge
 STEPS

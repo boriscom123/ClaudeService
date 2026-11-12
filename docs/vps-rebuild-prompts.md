@@ -318,7 +318,7 @@ DEFAULT_PROJECT=cs при пустом/битом), project_set_current. Нич�
 Создай scripts/watch-triggers.sh — inbound-only мост (bash). Запускается на хосте под рабочим
 пользователем, слушает Redis и инжектит в tmux-сессию Claude; ответы НЕ ждёт и не скрапит
 (итог Claude шлёт сам). Пути из окружения: REDIS_CONTAINER=claudeservice-redis-1,
-TMUX_SOCK=/tmp/tmux-$(id -u)/default, SESSION=${CLAUDE_SESSION:-claude}.
+TMUX_SOCK=/tmp/tmux-$(id -u)/default, SESSION=${CLAUDE_SESSION:-agent}.
 redis_cmd() = docker exec redis redis-cli; tmux_cmd() = tmux -S сокет. source projects.sh.
 
 Функции:
@@ -350,14 +350,14 @@ tier=now → inject сразу; tier=hold → RPUSH tg:hold:<проект>; tier
 Создай два скрипта. Пути к claude и tmux-сокету — из окружения (command -v claude / id -u), не хардкодь.
 
 scripts/switch-project.sh <id>: source projects.sh. CLAUDE_BIN=$(command -v claude || echo
-"$HOME/.local/bin/claude"), SESSION=${CLAUDE_SESSION:-claude}, TMUX_SOCKET=/tmp/tmux-$(id -u)/default.
+"$HOME/.local/bin/claude"), SESSION=${CLAUDE_SESSION:-agent}, TMUX_SOCKET=/tmp/tmux-$(id -u)/default.
 Убить tmux-сессию SESSION и поднять новую под ТЕМ ЖЕ именем в каталоге проекта, запустить в ней claude.
 Верифицировать (до ~10с), что сессия существует И в дереве её процессов реально есть процесс `claude`
 (обход pane_pid → потомки). current-project (project_set_current) писать ТОЛЬКО после успешной
 верификации; при провале — откат на прежний проект и exit 1. НЕ запускать изнутри самой сессии Claude.
 
 scripts/start-claude.sh: для systemd-автостарта после ребута. source projects.sh, те же CLAUDE_BIN/
-SESSION/сокет из окружения. Если tmux-сессии 'claude' нет — создать detached в каталоге project_current
+SESSION/сокет из окружения. Если tmux-сессии 'agent' нет — создать detached в каталоге project_current
 и запустить claude; затем фоном через 15с отправить в Telegram уведомление «🤖 Claude запущен, проект …»
 (токен/chat_id читать ровно нужными ключами из .env, не сорсить весь файл). Создать каталог сокета, если нет.
 ```
@@ -473,7 +473,7 @@ echo "$(id -un) ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /sbin/reboot, /u
 сессии `build`; каноническую `claude` создаёт `start-claude.sh` отдельно:
 ```bash
 scripts/start-claude.sh
-tmux -S /tmp/tmux-$(id -u)/default attach -t claude   # убедиться, что Claude поднялся; Ctrl-b d — отцепиться
+tmux -S /tmp/tmux-$(id -u)/default attach -t agent   # убедиться, что агент поднялся; Ctrl-b d — отцепиться
 ```
 
 **📋 Промпт** (можно дать в build-сессии — Claude проверит со стороны сервиса)

@@ -6,13 +6,15 @@ const MAIN_MENU_INLINE = {
   inline_keyboard: [
     [{ text: '💻 Статус VPS', callback_data: 'm:vps' }, { text: '🔀 Фиксировать git', callback_data: 'm:git' }],
     [{ text: '🗑️ Очистить чат', callback_data: 'm:clear' }],
-    [{ text: '📁 Проект', callback_data: 'm:project' }, { text: '🔄 Перезагрузить VPS', callback_data: 'm:reboot' }],
+    [{ text: '📁 Проект', callback_data: 'm:project' }, { text: '🧠 Модель', callback_data: 'm:model' }],
+    [{ text: '🔄 Перезагрузить VPS', callback_data: 'm:reboot' }],
     [{ text: '❓ Помощь', callback_data: 'm:help' }],
   ],
 };
 
 // Иконки проектов по id (дефолт — 📁). Имена берём из cs:projects.
-const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫', cs: '🤖', mp: '📝', pt: '🎬', sk: '🧪', sbd: '🗄️' };
+const PROJECT_ICONS = { game: '🎮', cm: '💬', uq: '🎫', cs: '🤖', mp: '📝', pt: '🎬', sk: '🧪', sbd: '🗄️', s21: '🎓' };
+const MODEL_ICONS = { claude: '🟠', grok: '✦', codex: '🤖' };
 
 // Меню выбора проекта строится ДИНАМИЧЕСКИ из Redis-хэша cs:projects (id→имя),
 // который пишет мост из scripts/projects.sh. Добавление проекта не требует
@@ -30,6 +32,20 @@ async function projectMenuInline(redis, current) {
   };
 }
 
+// Меню модели — из Redis-хэша cs:models (id→имя), его пишет мост.
+// Текущая помечается галочкой. null, если мост ещё не опубликовал реестр.
+async function modelMenuInline(redis, current) {
+  const map = await redis.hGetAll('cs:models').catch(() => ({}));
+  const ids = Object.keys(map || {}).sort();
+  if (ids.length === 0) return null;
+  return {
+    inline_keyboard: ids.map(id => [{
+      text: `${id === current ? '✅ ' : ''}${MODEL_ICONS[id] || '🧠'} ${map[id]}`,
+      callback_data: `model:${id}`,
+    }]),
+  };
+}
+
 // Нижняя ReplyKeyboard приветствия.
 // Отправляется ОДИН раз с приветствием (send() её не переотправляет),
 // поэтому нажатие помечается reply на приветствие — известное поведение
@@ -37,10 +53,11 @@ async function projectMenuInline(redis, current) {
 const WELCOME_KEYBOARD = {
   keyboard: [
     ['💻 Информация о VPS', '🔄 Перезагрузить VPS'],
-    ['📁 Проект', '❓ Справка'],
+    ['📁 Проект', '🧠 Модель'],
+    ['❓ Справка'],
   ],
   resize_keyboard: true,
   is_persistent: true,
 };
 
-module.exports = { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline };
+module.exports = { MAIN_MENU_INLINE, WELCOME_KEYBOARD, projectMenuInline, modelMenuInline };

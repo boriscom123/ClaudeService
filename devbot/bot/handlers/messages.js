@@ -18,6 +18,7 @@ const MENU_LABELS = {
   '🗑️ Очистить чат': 'clear',
   '🔄 Перезагрузить VPS': 'reboot',
   '📁 Проект': 'project',
+  '🧠 Модель': 'model',
   '❓ Справка': 'help', '❓ Помощь': 'help',
 };
 
@@ -74,7 +75,7 @@ async function handleMessage(message) {
       await redis.del(`tg:askown:${chatId}`);
       await enqueue(chatId, message.message_id, `[Свой вариант] ${text}`,
         { attachmentPath: mPath, attachmentType: mediaType(message) });
-      await send(chatId, '✍️ Принял твой вариант — передал Claude.');
+      await send(chatId, '✍️ Принял твой вариант — передал в активную сессию.');
       return;
     }
   }
@@ -101,7 +102,7 @@ async function handleMessage(message) {
     // отработала» — разбор жалобы на пропавшую клавиатуру упёрся именно в это.
     console.log(`[devbot] ${text} от ${message.from?.id} — отправляю клавиатуру`);
     await sendWelcome(chatId,
-      '👋 <b>DevBot на связи.</b>\nПиши любой текст — отвечу через Claude.\nНажми <b>❓ Помощь</b> для справки.');
+      '👋 <b>DevBot на связи.</b>\nПиши любой текст — он уйдёт в активную модель (Claude, Grok или ChatGPT Codex).\nНажми <b>❓ Помощь</b> для справки. Клавиатуру после обновления бота обновит <code>/keyboard_update</code>.');
     return;
   }
   // /keyboard_update — переотправить нижнюю клавиатуру после изменения

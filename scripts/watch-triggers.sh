@@ -1,11 +1,12 @@
 #!/bin/bash
-# Telegram→Claude tmux bridge — ТОЛЬКО ВХОДЯЩИЕ (inbound-only).
+# Telegram→tmux bridge — ТОЛЬКО ВХОДЯЩИЕ (inbound-only).
 # Runs on host as user boris (docker group + tmux socket access).
 #
 # Архитектура (push):
-#   - Берёт сообщения из Redis tg:queue и инжектит в tmux-сессию "claude".
+#   - Берёт сообщения из Redis tg:queue и инжектит в tmux-сессию "agent"
+#     (окно main, в нём один процесс выбранной модели).
 #   - Ответы НЕ ждёт и НЕ скрапит с экрана.
-#   - Итог пользователю Claude отправляет сам через scripts/tg-send.sh.
+#   - Итог пользователю агент отправляет сам через scripts/tg-send.sh.
 #
 # Это убирает таймауты ожидания, дампы транскрипта CLI и парсинг TG_REPLY.
 
@@ -16,7 +17,7 @@ source "$SCRIPT_DIR/projects.sh"
 
 REDIS_CONTAINER="claudeservice-redis-1"
 TMUX_SOCK="/tmp/tmux-1000/default"
-SESSION="${CLAUDE_SESSION:-claude}"
+SESSION="${CLAUDE_SESSION:-agent}"
 # DEVBOT_TOKEN — из systemd EnvironmentFile (.env)
 
 redis_cmd() { docker exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null; }
@@ -31,21 +32,27 @@ publish_projects() {
   for id in $(project_list); do args+=("$id" "$(project_name "$id")"); done
   redis_cmd DEL cs:projects >/dev/null 2>&1
   [ ${#args[@]} -gt 0 ] && redis_cmd HSET cs:projects "${args[@]}" >/dev/null 2>&1
-  LAST_LIVE_DIR=""   # форсируем публикацию cs:current/cs:current_dir
+  # Меню «Модель» строится так же, из реестра, а не из картинки в devbot.
+  redis_cmd DEL cs:models >/dev/null 2>&1
+  redis_cmd HSET cs:models claude "$(model_name claude)" grok "$(model_name grok)" codex "$(model_name codex)" >/dev/null 2>&1
+  LAST_PUBLISH_KEY=""   # форсируем публикацию cs:current / cs:model
   publish_current
 }
 
-# cs:current — id реального проекта сессии ("" — неподключённый каталог),
-# cs:current_dir — сам каталог (devbot показывает его в меню «Проект»).
-# Пишем в Redis только при смене каталога: зовётся на каждой итерации цикла.
-LAST_LIVE_DIR=""
+# cs:current — проект окна активной модели ("" — каталог вне реестра),
+# cs:current_dir — сам каталог, cs:model — claude|grok|codex.
+# Пишем в Redis только при смене каталога или модели.
+LAST_PUBLISH_KEY=""
 publish_current() {
-  local dir
+  local dir model key
   dir="$(project_session_dir)"
-  [ "${dir:--}" = "$LAST_LIVE_DIR" ] && return
-  LAST_LIVE_DIR="${dir:--}"
+  model="$(model_current)"
+  key="${model}|${dir:--}"
+  [ "$key" = "$LAST_PUBLISH_KEY" ] && return
+  LAST_PUBLISH_KEY="$key"
   redis_cmd SET cs:current "$(project_live)" >/dev/null 2>&1
   redis_cmd SET cs:current_dir "$dir" >/dev/null 2>&1
+  redis_cmd SET cs:model "$model" >/dev/null 2>&1
 }
 
 # Системное уведомление пользователю (например, Claude не запущен).
@@ -63,8 +70,13 @@ tg_send() {
 # временем продолжения. Дедуп — через Redis tg:limit_notified; при исчезновении
 # строки маркер сбрасываем, чтобы следующий лимит снова уведомил.
 check_session_limit() {
-  local pane line reset last reset_epoch
-  pane=$(tmux_cmd capture-pane -p -J -t "$SESSION" -S -40 2>/dev/null || echo "")
+  local pane line reset last reset_epoch target
+  # Лимит Claude смотрим только когда в единственном окне именно Claude.
+  # Панель Grok нельзя сканировать: в переписке та же фраза.
+  [ "$(model_current)" = "claude" ] || return 0
+  target="$(agent_target)"
+  tmux_cmd list-panes -t "$target" >/dev/null 2>&1 || return 0
+  pane=$(tmux_cmd capture-pane -p -J -t "$target" -S -40 2>/dev/null || echo "")
   # Точная фраза реального сообщения Claude Code (не просто "session limit" —
   # иначе ловит упоминания/исходник скрипта в самой панели).
   line=$(echo "$pane" | grep -iE "hit your session limit" | grep -iF "resets" | tail -1)
@@ -99,7 +111,10 @@ check_session_limit() {
 # loop), то по наступлении времени, при ОТСУТСТВИИ баннера лимита и простое сессии —
 # реинжектим команду и уведомляем. Generic: без этих ключей ничего не делает (game/cm не затронуты).
 maybe_resume() {
-  local resume_at pane cmd
+  local resume_at pane cmd target
+  # Команда резюме писалась для Claude. В окно Grok её не вставляем.
+  [ "$(model_current)" = "claude" ] || return 0
+  target="$(agent_target)"
   resume_at=$(redis_cmd GET claude:resume_at 2>/dev/null)
   if [ -z "$resume_at" ] || [ "$resume_at" = "(nil)" ]; then
     return
@@ -107,10 +122,10 @@ maybe_resume() {
   if [ "$(date +%s)" -lt "$resume_at" ]; then
     return  # время сброса ещё не наступило
   fi
-  if ! tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
+  if ! tmux_cmd list-panes -t "$target" >/dev/null 2>&1; then
     return
   fi
-  pane=$(tmux_cmd capture-pane -p -J -t "$SESSION" -S -40 2>/dev/null || echo "")
+  pane=$(tmux_cmd capture-pane -p -J -t "$target" -S -40 2>/dev/null || echo "")
   if echo "$pane" | grep -iqE "hit your session limit"; then
     return  # лимит ещё висит
   fi
@@ -124,24 +139,39 @@ maybe_resume() {
   fi
   echo "[tg-bridge] Limit reset reached → re-injecting resume command"
   printf '%s' "$cmd" | tmux_cmd load-buffer -
-  tmux_cmd paste-buffer -t "$SESSION"
-  tmux_cmd send-keys -t "$SESSION" Enter
+  tmux_cmd paste-buffer -t "$target"
+  tmux_cmd send-keys -t "$target" Enter
   redis_cmd DEL claude:resume_at >/dev/null 2>&1
   [ -n "${TELEGRAM_ADMIN_CHAT_ID:-}" ] && tg_send "$TELEGRAM_ADMIN_CHAT_ID" \
     "▶️ Лимит сброшен — автоматически возобновил работу."
 }
 
-# Занят ли Claude прямо сейчас. Маркер: в видимой панели есть "esc to interrupt"
-# (footer Claude Code во время генерации/выполнения инструментов). Нет строки → простой.
+# Занята ли активная модель. Claude — footer «esc to interrupt».
+# Grok footer другой: на время хода он держит дочерний systemd-inhibit
+# с причиной «agent turn in progress». Нет маркера → простой.
 session_busy() {
-  local pane
-  pane=$(tmux_cmd capture-pane -p -t "$SESSION" 2>/dev/null || echo "")
+  local model pane target gpid
+  model="$(model_current)"
+  if [ "$model" = "grok" ]; then
+    gpid="$(pane_proc_pid "$(agent_target grok)" grok 2>/dev/null || true)"
+    [ -n "$gpid" ] || return 1
+    ps -o args= --ppid "$gpid" 2>/dev/null | grep -q "agent turn in progress"
+    return
+  fi
+  if [ "$model" = "codex" ]; then
+    target="$(agent_target codex)"
+    pane=$(tmux_cmd capture-pane -p -J -t "$target" -S -8 2>/dev/null || echo "")
+    echo "$pane" | tail -8 | grep -qiE "working|thinking|esc to interrupt"
+    return
+  fi
+  target="$(agent_target claude)"
+  pane=$(tmux_cmd capture-pane -p -t "$target" 2>/dev/null || echo "")
   echo "$pane" | grep -qiF "esc to interrupt"
 }
 
-# Переключение проекта выполняет МОСТ, а не Claude: switch-project.sh убивает
-# сессию, в которой запущен, — Claude не пережил бы собственную команду.
-# Возвращает 0, если сообщение обработано здесь и инжектить его не нужно.
+# Переключение проекта выполняет МОСТ, а не агент в окне: --restart единственного
+# окна убивает процесс, который вызвал бы скрипт сам. Возвращает 0, если
+# сообщение обработано здесь и инжектить его не нужно.
 handle_switch_project() {
   local chat_id="$1" text="$2"
   local target label
@@ -161,7 +191,7 @@ handle_switch_project() {
   # Сравниваем с реальным каталогом сессии, а не с файлом current-project:
   # из неподключённого каталога (skat и т.п.) переключение на любой проект
   # реестра должно работать. Мёртвую сессию тоже поднимаем заново.
-  if [ "$target" = "$(project_live)" ] && tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
+  if [ "$target" = "$(project_live)" ] && agent_proc_running "$(model_current)"; then
     tg_send "$chat_id" "📁 Уже на проекте <b>$(project_name "$target")</b> — переключать нечего."
     return 0
   fi
@@ -170,14 +200,71 @@ handle_switch_project() {
   echo "[tg-bridge] Switching project → $target"
   # Сбрасываем авто-резюм: он привязан к прошлому проекту/сессии.
   redis_cmd DEL claude:resume_at claude:resume_cmd >/dev/null 2>&1
-  tg_send "$chat_id" "🔄 Переключаю на <b>${label}</b>… Контекст текущей сессии будет потерян."
+  tg_send "$chat_id" "🔄 Переключаю на <b>${label}</b>…
+Модель <b>$(model_name "$(model_current)")</b> та же. Контекст чата будет потерян."
 
   # Вывод НЕ гасим: при провале показываем пользователю реальную причину.
   local out
   if out=$("$SCRIPT_DIR/switch-project.sh" "$target" 2>&1); then
     publish_projects   # реестр мог измениться — обновим для меню/валидации
     tg_send "$chat_id" "📁 Проект: <b>${label}</b>
-Claude перезапущен, контекст чистый."
+$(model_name "$(model_current)") перезапущен в этом каталоге. Модель не менялась."
+  else
+    local tail_out
+    tail_out=$(printf '%s' "$out" | tail -3 | sed 's/[<>&]//g')
+    tg_send "$chat_id" "❌ Не удалось переключиться на <b>${label}</b>:
+<code>${tail_out}</code>"
+  fi
+  return 0
+}
+
+# Смена модели заменяет процесс в том же каталоге. Контекст чата теряется.
+# Файл модели пишем только после успеха, иначе сообщения уедут не туда.
+handle_switch_model() {
+  local chat_id="$1" text="$2"
+  local target label out dir live
+
+  case "$text" in
+    "[Переключить модель]"*) ;;
+    *) return 1 ;;
+  esac
+
+  target=$(printf '%s' "$text" | sed -E 's/^\[Переключить модель\][[:space:]]*//' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+
+  if [ -z "${MODEL_NAMES[$target]:-}" ]; then
+    tg_send "$chat_id" "❌ Неизвестная модель: <b>${target}</b>. Доступны: $(model_list)"
+    return 0
+  fi
+
+  label=$(model_name "$target")
+  if [ "$target" = "$(model_current)" ] && agent_proc_running "$target"; then
+    tg_send "$chat_id" "🧠 Уже на <b>${label}</b> — сообщения из бота идут в эту сессию."
+    return 0
+  fi
+
+  # Проект не меняется: новый процесс встаёт в каталог текущей сессии.
+  dir="$(project_session_dir)"
+  if [ -z "$dir" ]; then
+    dir="$(project_dir "$(project_current)" 2>/dev/null || true)"
+  fi
+  if [ -z "$dir" ] || [ ! -d "$dir" ]; then
+    tg_send "$chat_id" "❌ Не вижу каталог текущей сессии — модель не меняю."
+    return 0
+  fi
+
+  echo "[tg-bridge] Switching model → $target (dir $dir)"
+  tg_send "$chat_id" "🔄 Переключаю модель на <b>${label}</b>…
+Проект тот же. Контекст текущего чата будет потерян."
+
+  if out=$("$SCRIPT_DIR/ensure-model.sh" "$target" --restart "$dir" 2>&1); then
+    model_set "$target"
+    live=$(project_by_dir "$dir" 2>/dev/null || true)
+    [ -n "$live" ] && project_set_current "$live"
+    LAST_PUBLISH_KEY=""
+    publish_current
+    tg_send "$chat_id" "🧠 Модель: <b>${label}</b>
+📁 Проект: <b>$(project_name "$(project_live)")</b>
+Контекст предыдущей модели не сохранён."
   else
     local tail_out
     tail_out=$(printf '%s' "$out" | tail -3 | sed 's/[<>&]//g')
@@ -205,9 +292,15 @@ inject_message() {
   if handle_switch_project "$chat_id" "$text"; then
     return
   fi
+  if handle_switch_model "$chat_id" "$text"; then
+    return
+  fi
 
-  if ! tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
-    tg_send "$chat_id" "❌ Claude не запущен на сервере. Запустите его через SSH."
+  local model target_pane
+  model="$(model_current)"
+  target_pane="$(agent_target "$model")"
+  if ! agent_proc_running "$model"; then
+    tg_send "$chat_id" "❌ <b>$(model_name "$model")</b> не запущен. Откройте меню «🧠 Модель» и выберите её ещё раз — подниму окно."
     return
   fi
 
@@ -227,12 +320,14 @@ inject_message() {
   # без служебного префикса [TG]: в файле истории он только мешает.
   "$SCRIPT_DIR/history-log.sh" in "${text:-$inject_text}" 2>/dev/null || true
 
-  echo "[tg-bridge] Injecting: ${inject_text:0:100}..."
+  echo "[tg-bridge] Injecting into ${target_pane}: ${inject_text:0:100}..."
 
   # Безопасная инъекция: load-buffer корректно обрабатывает кавычки, $, backtick.
+  # Цель — окно модели, а не «текущее видимое» окно сессии.
   printf '%s' "$inject_text" | tmux_cmd load-buffer -
-  tmux_cmd paste-buffer -t "$SESSION"
-  tmux_cmd send-keys -t "$SESSION" Enter
+  tmux_cmd paste-buffer -t "$target_pane"
+  sleep 0.3
+  tmux_cmd send-keys -t "$target_pane" Enter
 }
 
 # Маршрутизация входящих (tier задаёт devbot в payload):
@@ -241,9 +336,35 @@ inject_message() {
 #   prio → в приоритетную очередь проекта tg:hold:prio:<проект>.
 # Проект: payload.target_project (кросс-проект) или текущий. У каждого проекта
 # СВОЯ очередь — сообщения других проектов ждут переключения на них.
+
+# Пустой файл модели: один раз смотрим, кто на переднем плане сессии.
+# Сейчас это Grok в окне grok — так сообщения пойдут сюда без ручного клика.
+seed_model_file() {
+  [ -s "$CURRENT_MODEL_FILE" ] && return 0
+  # Окно grok может быть внуком bash: смотрим дерево процессов, не только
+  # pane_current_command. Иначе файл останется пустым и мост решит, что модель Claude.
+  if pane_proc_pid "$(agent_target)" codex >/dev/null 2>&1; then
+    printf 'codex\n' > "$CURRENT_MODEL_FILE"
+    echo "[tg-bridge] model file seeded: Codex is running"
+    return 0
+  fi
+  if pane_proc_pid "$(agent_target)" grok >/dev/null 2>&1; then
+    printf 'grok\n' > "$CURRENT_MODEL_FILE"
+    echo "[tg-bridge] model file seeded: Grok is running"
+    return 0
+  fi
+  if pane_proc_pid "$(agent_target)" claude >/dev/null 2>&1; then
+    printf 'claude\n' > "$CURRENT_MODEL_FILE"
+    echo "[tg-bridge] model file seeded: claude is running"
+    return 0
+  fi
+}
+
 main() {
-  echo "[tg-bridge] Started (per-project tier-queue). Polling Redis tg:queue every 2s..."
+  echo "[tg-bridge] Started (per-project tier-queue, model-aware). Polling Redis tg:queue every 2s..."
   echo "[tg-bridge] tmux socket: $TMUX_SOCK | session: $SESSION"
+  seed_model_file
+  echo "[tg-bridge] model: $(model_current) target: $(agent_target 2>/dev/null || echo '?')"
   publish_projects
   local idle_streak=0
 
@@ -290,7 +411,9 @@ main() {
       idle_streak=$((idle_streak + 1))
     fi
 
-    if [ "$idle_streak" -ge 2 ] && tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
+    # Очередь не снимаем, пока процесс модели не поднят: иначе сообщение
+    # пропадёт из Redis и пользователь получит только «не запущен».
+    if [ "$idle_streak" -ge 2 ] && agent_proc_running "$(model_current)"; then
       local P held
       # Очередь проекта доставляем только в сессию, которая реально в нём:
       # в чужом каталоге (skat) задачи проекта выполнились бы не там.

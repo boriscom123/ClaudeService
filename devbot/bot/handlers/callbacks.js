@@ -35,14 +35,24 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
-  // proj:<id> — переключение проекта. Строку забирает МОСТ (watch-triggers.sh),
-  // а не Claude: switch-project.sh убивает сессию, в которой запущен.
+  // proj:<id> — переключение проекта. Строку забирает МОСТ (watch-triggers.sh):
+  // перезапуск окна убивает процесс, который сидит в этом окне.
   if (action === 'proj') {
     await answerCallback(callbackQuery.id, '🔄 Переключаю…');
     await apiCall('editMessageReplyMarkup', {
       chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] },
     });
     await enqueue(chatId, null, `[Переключить проект] ${tag}`);
+    return;
+  }
+
+  // model:<claude|grok|codex> — тоже мост: поднять или переиспользовать окно модели.
+  if (action === 'model') {
+    await answerCallback(callbackQuery.id, '🔄 Переключаю…');
+    await apiCall('editMessageReplyMarkup', {
+      chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] },
+    });
+    await enqueue(chatId, null, `[Переключить модель] ${tag}`);
     return;
   }
 
@@ -55,7 +65,7 @@ async function handleCallback(callbackQuery) {
       // Claude (на хосте) выполняет reboot; после загрузки поднимется сам.
       await enqueue(chatId, null,
         '[Перезагрузка VPS] Запусти scripts/reboot-vps.sh — он перезагрузит VPS. ' +
-        'После перезагрузки claude-autostart.service поднимет сессию заново.');
+        'После перезагрузки claude-autostart.service поднимет активную модель заново.');
     } else {
       await answerCallback(callbackQuery.id, 'Отменено');
     }
